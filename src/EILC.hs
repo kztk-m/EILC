@@ -470,25 +470,6 @@ code2conn' (CJoin pc1 pc2) c k =
   [|| let (c1, c2) = unCJoin $$c
       in $$(code2conn' pc1 [|| c1 ||] $ \c1' -> code2conn' pc2 [|| c2 ||] $ \c2' -> k (CJoin c1' c2')) ||]
 
-
--- runIFq :: forall a b. IFq a b -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
--- runIFq =
---   \case (IFq _ f tr) ->
---           [||
---               let ff :: forall aa bb.  aa -> (bb, Interaction (Delta aa) (Delta bb))
---                   ff a = $$(toCode $ do { (b, c) <- f [|| a ||]
---                                         ; let mkRtr :: forall cs. (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs)) -> Conn PackedCode cs -> Code (Interaction (Delta a) (Delta b))
---                                               mkRtr tr c =
---                                                 [|| let func cp = Interaction $ \da ->
---                                                             $$(code2conn pc [|| cp ||] $ \cs ->
---                                                                 runCodeC (tr [|| da ||] cs) $ \(db, cs') -> [|| ($$db, func pa pb $$(conn2code cs')) ||])
---                                                     in
-
---                                         ; let rtr = mkRTr tr c
---                                         ; return [|| ($$b , $$rtr) ||] } )
---               in ff
---             ||]
-
 ensureDiffType :: (Proxy a -> Proxy b -> a -> (b, Interaction (Delta a) (Delta b))) -> (a -> (b, Interaction (Delta a) (Delta b)))
 ensureDiffType f = f Proxy Proxy
 
@@ -497,6 +478,62 @@ mkInteraction _ _ = Interaction
 
 eqProxy :: Proxy a -> Proxy a -> b -> b
 eqProxy _ _ x = x
+
+{-
+Rethinking `mkRTr`.
+
+     mkRTr :: forall cs.
+               Code (Proxy a) -> Code (Proxy b)
+               -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
+               -> Conn PackedCode cs
+               -> Code (Interaction (Delta a) (Delta b))
+
+The goal is we want to make a function
+
+    let
+      ff = mkAbs pc $ \cs -> Interaction $ \a ->
+              $$(tr [|| a ||] (toConn c1 .. cn) $ \(db, cs') -> [|| ($$db, $$(mkApp [|| ff ||] cs') ||] )
+    in $$(mkApp [|| ff ||] cs)
+
+So, our goal is to write a function mkApp and mkAbs.
+
+    mkAbs :: Conn Proxy cs -> (Conn PackedCode cs -> Code a) -> (Code (Func cs a))
+    mkApp :: Code (Func cs a) -> Conn PackedCode cs -> Code a
+
+First, let me think of Func cs a.
+
+   Func None a = a
+   Func (NE cne) a = Func' cne a
+
+   Func (One c) a       = c -> a
+   Func (CJoin c1 c2) a = Func c1 (Func c2 a)
+
+-}
+
+type family Func (cs :: Tree Type) (a :: Type) :: Type where
+  Func 'None a    = a
+  Func ('NE ne) a = Func' ne a
+
+type family Func' (cs :: NETree Type) (a :: Type ) :: Type where
+  Func' ('NEOne c) a      = c -> a
+  Func' ('NEJoin c1 c2) a = Func' c1 (Func' c2 a)
+
+mkAbs :: Conn Proxy cs -> (Conn PackedCode cs -> Code a) -> Code (Func cs a)
+mkAbs CNone k    = k CNone
+mkAbs (CNE cs) k = mkAbs' cs (k . CNE)
+
+mkAbs' :: NEConn Proxy cs -> (NEConn PackedCode cs -> Code a) -> Code (Func' cs a)
+mkAbs' (COne _) k      = [|| \a -> $$(k (COne $ PackedCode [|| a ||])) ||]
+mkAbs' (CJoin c1 c2) k = mkAbs' c1 $ \c1' -> mkAbs' c2 $ \c2' -> k (CJoin c1' c2')
+
+mkApp :: Code (Func cs a) -> Conn PackedCode cs -> Code a
+mkApp f CNone    = f
+mkApp f (CNE cs) = mkApp' f cs
+
+mkApp' :: Code (Func' cs a) -> NEConn PackedCode cs -> Code a
+mkApp' f (COne (PackedCode a)) = [|| $$f $$a ||]
+mkApp' f (CJoin c1 c2)         = mkApp' (mkApp' f c1) c2
+
 
 runIFq :: forall a b. IFq a b -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
 runIFq = \case (IFq _ f tr) ->
@@ -508,10 +545,17 @@ runIFq = \case (IFq _ f tr) ->
   where
     mkRTr :: forall cs. Code (Proxy a) -> Code (Proxy b) -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs)) -> Conn PackedCode cs -> Code (Interaction (Delta a) (Delta b))
     mkRTr pa pb tr c =
-      [|| let func cp = mkInteraction $$pa $$pb $ \da ->
-                            $$(code2conn pc [|| cp ||] $ \cs ->
-                                runCodeC (tr [|| da ||] cs) $ \(db, cs') -> [|| ($$db, func $$(conn2code cs')) ||])
-          in func $$(conn2code c) ||]
+      [||
+         let func = $$(mkAbs pc $ \cs ->
+                        [|| mkInteraction $$pa $$pb $ \da ->
+                               $$( runCodeC (tr [|| da ||] cs) $ \(db, cs') -> [|| ($$db, $$( mkApp [|| func ||] cs' )) ||] )
+                        ||])
+         in $$( mkApp [|| func ||] c )
+      ||]
+      -- [|| let func cp = mkInteraction $$pa $$pb $ \da ->
+      --                       $$(code2conn pc [|| cp ||] $ \cs ->
+      --                           runCodeC (tr [|| da ||] cs) $ \(db, cs') -> [|| ($$db, func $$(conn2code cs')) ||])
+      --     in func $$(conn2code c) ||]
       where
         pc = map2Conn (const Proxy) c
 
@@ -871,6 +915,49 @@ Now, generated code for `ave` type checks.
                                    let v_a1o9v = (runIdentity (unCOne (unCNE cp_a1o9i)) /+ v_a1o9p)
                                    in (v_a1o9q, func_a1o9h (CNE (COne (Identity v_a1o9v))))))
                   in func_a1o9h (CNE (COne (Identity v_a1o9f))))))
+
+2021-07-07: Now, it generates the following code.
+
+    runIFq (runAppMono' ave)
+  ======>
+    (ensureDiffType
+       $ (\ pa_a9yH pb_a9yI a_a9yJ
+            -> let v_a9yK = case a_a9yJ of { Bag as_a9yL -> sum as_a9yL } in
+               let v_a9yM = case a_a9yJ of { Bag as_a9yN -> length as_a9yN } in
+               let v_a9yO = fromIntegral v_a9yM :: Double in
+               let v_a9yP = (v_a9yK, v_a9yO) in
+               let v_a9yQ = (uncurry (/)) v_a9yP
+               in
+                 (v_a9yQ,
+                  let
+                    func_a9yR
+                      = \ a_a9yS
+                          -> ((mkInteraction pa_a9yH) pb_a9yI
+                                $ (\ da_a9yT
+                                     -> let
+                                          v_a9yU
+                                            = case da_a9yT of {
+                                                Bag as'_a9yV -> Sum (sum as'_a9yV) } in
+                                        let
+                                          v_a9yW
+                                            = case da_a9yT of {
+                                                Bag as_a9yX -> Sum (length as_a9yX) } in
+                                        let v_a9yY = Sum (fromIntegral (getSum v_a9yW) :: Double) in
+                                        let v_a9yZ = (v_a9yU, v_a9yY) in
+                                        let
+                                          v_a9z0
+                                            = let
+                                                (x_a9z3, y_a9z4) = a_a9yS
+                                                (dx_a9z1, dy_a9z2) = v_a9yZ
+                                              in
+                                                (Sum
+                                                   $ (((x_a9z3 /+ dx_a9z1) / (y_a9z4 /+ dy_a9z2))
+                                                        - (x_a9z3 / y_a9z4))) in
+                                        let v_a9z5 = (a_a9yS /+ v_a9yZ)
+                                        in (v_a9z0, func_a9yR v_a9z5)))
+                  in func_a9yR v_a9yP)))
+
+
 
 -}
 
