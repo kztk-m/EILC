@@ -231,7 +231,7 @@ There are a few obvious sources of overhead.
 Everything is orthogonal. A possible solution for each issue is:
 
   - To use metaprogramming to compute such overhead away
-  - To use "difference lists" for c
+  - To use the join list that has the canonical empty representation for c
   - To handle Maybe (Delta a) instead of Delta a
 
 Since the third one is rather easy, here we focus on the former two.
