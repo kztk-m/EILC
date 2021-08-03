@@ -111,6 +111,10 @@ data Env f as where
   ENil  :: Env f '[]
   ECons :: f a -> Env f as -> Env f (a ': as)
 
+mapEnv :: (forall a. f a -> g a) -> Env f as -> Env g as
+mapEnv _ ENil         = ENil
+mapEnv h (ECons x xs) = ECons (h x) (mapEnv h xs)
+
 lenEnv :: Env f as -> Int
 lenEnv ENil        = 0
 lenEnv (ECons _ r) = 1 + lenEnv r
@@ -576,7 +580,9 @@ class App cat e | e -> cat where
   lift :: cat a b -> e a -> e b
   unit :: e ()
   pair :: e a -> e b -> e (a, b)
-  share :: e a -> (e a -> e b) -> e b
+
+  -- Having `share` here is too specific.
+  -- share :: e a -> (e a -> e b) -> e b
 
 
 class Category cat => AppS cat where
@@ -618,10 +624,10 @@ instance AppS cat => App cat (Sem cat) where
   unit = Sem $ const unitS
   pair (Sem e1) (Sem e2) = Sem $ \tenv -> multS (e1 tenv) (e2 tenv)
 
-  share (Sem e0) k = Sem $ \tenv ->
-    let tenva = ECons Proxy tenv
-        arg = Sem $ \tenv' -> diffS tenva tenv' headS
-    in runSem (k arg) tenva . econsS . multS (e0 tenv) id
+  -- share (Sem e0) k = Sem $ \tenv ->
+  --   let tenva = ECons Proxy tenv
+  --       arg = Sem $ \tenv' -> diffS tenva tenv' headS
+  --   in runSem (k arg) tenva . econsS . multS (e0 tenv) id
 
 diffS :: AppS cat => Env Proxy as -> Env Proxy bs -> cat (Env Identity as) a -> cat (Env Identity bs) a
 diffS tenv1 tenv2 | trace (printf "Diff: #tenv1 = %d and #tenv2 = %d" (lenEnv tenv1) (lenEnv tenv2)) False = undefined
@@ -766,6 +772,28 @@ TODO: how such ideas can be related to operad?
 
 -}
 
+data Sig2 k = SO [k] k
+type ts ~> t = 'SO ts t
+
+-- | Fun e ('[t1,...,tn] ~> t) ~ (e t1, ... ,e tn) -> e t
+data Fun (e :: k -> Type) (s :: Sig2 k) :: Type  where
+  Fun :: Env Proxy ts -> (Env e ts -> e r) -> Fun e (ts ~> r)
+
+{-
+ Abs :: Fun (e t ) (ts ~> r) Fun e ((a ': ts) ~> r)
+-}
+
+type family Append (xs :: [k]) (ys :: [k]) where
+  Append '[] ys       = ys
+  Append (x ': xs) ys = x ': Append xs ys
+
+appendEnv :: Env f xs -> Env f ys -> Env f (Append xs ys)
+appendEnv ENil ys         = ys
+appendEnv (ECons x xs) ys = ECons x (appendEnv xs ys)
+
+data TermF term env (s :: Sig2 k) :: Type where
+  TermF :: term (Append ts env) r -> TermF term env (ts ~> r)
+
 
 class Category cat => Term unit prod cat (term :: [k] -> k -> Type) | term -> cat, cat -> term, term -> unit, term -> prod, cat -> unit, cat -> prod  where
   -- prop> mapTerm (f . g) = mapTerm f . mapTerm g
@@ -777,7 +805,7 @@ class Category cat => Term unit prod cat (term :: [k] -> k -> Type) | term -> ca
   var0Term   :: term (a ': s) a
   weakenTerm :: term s a -> term (b ': s) a
 
-  letTerm    :: term s a -> term (a ': s) b -> term s b
+--  letTerm    :: term s a -> term (a ': s) b -> term s b
   unliftTerm :: term '[a] b -> cat a b
 
 newtype TSem term b = TSem { runTSem :: forall as. Env Proxy as -> term as b }
@@ -789,10 +817,43 @@ instance Term () (,) cat term => App cat (TSem term) where
   unit = TSem $ const unitTerm
   pair (TSem e1) (TSem e2) = TSem $ \tenv -> multTerm (e1 tenv) (e2 tenv)
 
-  share (TSem e0) k = TSem $ \tenv ->
-    let tenva = ECons Proxy tenv
-        arg = TSem $ \tenv' -> diffT tenva tenv' var0Term
-    in letTerm (e0 tenv) (runTSem (k arg) tenva)
+  -- share (TSem e0) k = TSem $ \tenv ->
+  --   let tenva = ECons Proxy tenv
+  --       arg = TSem $ \tenv' -> diffT tenva tenv' var0Term
+  --   in letTerm (e0 tenv) (runTSem (k arg) tenva)
+
+class App2 (term :: [k] -> k -> Type) (e :: k -> Type) | e -> term where
+  liftSO :: (forall p. Env (TermF term p) ss -> term p r)
+            -> Env (Fun e) ss -> e r
+
+
+instance Term () (,) cat term => App2 term (TSem term) where
+  liftSO comb ks = TSem $ \tenv -> comb (mapEnv (convert tenv) ks)
+    where
+      convert :: forall as a. Env Proxy as -> Fun (TSem term) a -> TermF term as a
+      convert tenv (Fun etenv f) = TermF $ runTSem (f $ makeArgs Proxy Proxy extendedTEnv id etenv) extendedTEnv
+        where
+          -- essentially makes
+          --   [trans x0, trans x1, trans x2, ..., trans xn]
+          -- where xi refers ith de Bruin index, and trans e = TSem $ \tenv' -> diffT extended tenv' e
+          makeArgs :: forall ets ts. Proxy ets -> Proxy as
+                      -> Env Proxy ets
+                      -> (forall b. term (Append ts as) b -> term ets b)
+                      -> Env Proxy ts -> Env (TSem term) ts
+          makeArgs _ _ _ _ ENil = ENil
+          makeArgs pHs (pAs :: Proxy as) extended weaken (ECons (_ :: Proxy b) (argTypes :: Env Proxy argTys)) =
+            let arg :: TSem term b
+                arg = TSem $ \tenv' -> diffT extended tenv' (weaken $ var0Term @Type @() @(,) @cat @term)
+            in ECons arg $ makeArgs pHs pAs extended (weaken . weakenTerm)  argTypes
+
+          extendedTEnv = appendEnv etenv tenv
+
+
+--      convert tenv f = TermF (convert' tenv f)
+
+      -- convert' :: Env Proxy as -> Fun (TSem term) (ts ~> r) -> term (Append ts as) r
+      -- convert' tenv (Body body) = _
+      -- convert' tenv (Abs f)     = _
 
 diffT :: Term unit prod cat term => Env Proxy as -> Env Proxy bs -> term as a -> term bs a
 diffT tenv1 tenv2 | trace (printf "Diff: #tenv1 = %d and #tenv2 = %d" (lenEnv tenv1) (lenEnv tenv2)) False = undefined
@@ -858,19 +919,20 @@ instance Term () (,) IFq IFqT where
       f'  a  = f  (ECons (PackedCode       a) ENil)
       tr' da = tr (ECons (PackedCodeDelta da) ENil)
 
-  letTerm (IFqT isNone1 f1 tr1) (IFqT isNone2 f2 tr2) = IFqT (isNoneAnd isNone1 isNone2) f tr
-    where
-      f s = do
-        (a, c1) <- f1 s
-        v <- mkLet a
-        (b, c2) <- f2 (ECons (PackedCode v) s)
-        return (b, joinConn c1 c2)
+letTermIFqT :: IFqT as b1 -> IFqT (b1 : as) b2 -> IFqT as b2
+letTermIFqT (IFqT isNone1 f1 tr1) (IFqT isNone2 f2 tr2) = IFqT (isNoneAnd isNone1 isNone2) f tr
+  where
+    f s = do
+      (a, c1) <- f1 s
+      v <- mkLet a
+      (b, c2) <- f2 (ECons (PackedCode v) s)
+      return (b, joinConn c1 c2)
 
-      tr s cc | (c1, c2) <- decompConn isNone1 isNone2 cc = do
-        (da, c1') <- tr1 s c1
-        dv <- mkLet da
-        (db, c2') <- tr2 (ECons (PackedCodeDelta dv) s) c2
-        return (db, joinConn c1' c2')
+    tr s cc | (c1, c2) <- decompConn isNone1 isNone2 cc = do
+      (da, c1') <- tr1 s c1
+      dv <- mkLet da
+      (db, c2') <- tr2 (ECons (PackedCodeDelta dv) s) c2
+      return (db, joinConn c1' c2')
 
 
 -- To check generated code:
@@ -976,20 +1038,23 @@ appC = ifqFromStateless (\z -> [|| case $$z of { (Bag xs, Bag ys) -> Bag (xs ++ 
 appF :: App IFq e => e (Bag Double) -> e (Bag Double) -> e (Bag Double)
 appF x y = lift appC (pair x y)
 
+-- FIXME: tentative
+share :: App2 IFqT e => e r1 -> (e r1 -> e r2) -> e r2
+share e k = liftSO (\(ECons (TermF e1) (ECons (TermF e2) ENil)) -> letTermIFqT e1 e2) (ECons (Fun ENil (\ENil -> e)) (ECons (Fun (ECons Proxy ENil) (\(ECons x ENil) -> k x)) ENil))
 
-cascadeAppS :: App IFq e => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
+cascadeAppS :: (App IFq e, App2 IFqT e) => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
 cascadeAppS 0 x f = f x
 cascadeAppS n x f = share (appF x x) $ \y -> cascadeAppS (n-1) y f
 
-cascadeAppC :: App IFq e => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
+cascadeAppC :: (App IFq e, App2 IFqT e) => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
 cascadeAppC 0 x f = f x
 cascadeAppC n x f = let y = appF x x in cascadeAppC (n-1) y f
 
 
-aveDupDup :: App IFq e => e (Bag Double) -> e Double
+aveDupDup :: (App IFq e, App2 IFqT e) => e (Bag Double) -> e Double
 aveDupDup x = cascadeAppS 4 x ave
 
-aveDupDup' :: App IFq e => e (Bag Double) -> e Double
+aveDupDup' :: (App IFq e, App2 IFqT e) => e (Bag Double) -> e Double
 aveDupDup' x = cascadeAppC 4 x ave
 
 {-
