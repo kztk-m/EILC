@@ -22,18 +22,16 @@ module EILC where
 import           Control.Category      (Category (..))
 import           Data.Coerce           (coerce)
 import           Data.Functor.Identity
-import           Data.Kind             (Constraint, Type)
 import           Data.Monoid           (Sum (..))
 import           Data.Typeable         (Proxy (..))
 import           Prelude               hiding (id, (.))
 import qualified Unsafe.Coerce         as Unsafe
 
-import           Debug.Trace           (trace)
 import qualified Language.Haskell.TH   as TH
-import           Text.Printf           (printf)
 
 import           Data.Env
-
+import           Data.Kind             (Type)
+import           Language.Unembedding
 
 type family Delta (a :: Type) :: Type
 
@@ -567,75 +565,85 @@ Let us see its effect by actual unembedding. Here, since we do not want to
 prepare unembedded types for each C, we will prepare one type that works for all.
 -}
 
-newtype Sem cat b = Sem { runSem :: forall as. Env Proxy as -> cat (Env Identity as) b }
+-- newtype Sem cat b = Sem { runSem :: forall as. Env Proxy as -> cat (Env Identity as) b }
 
-class App cat e | e -> cat where
-  lift :: cat a b -> e a -> e b
-  unit :: e ()
-  pair :: e a -> e b -> e (a, b)
-
-  -- Having `share` here is too specific.
-  -- share :: e a -> (e a -> e b) -> e b
+--   -- Having `share` here is too specific.
+--   -- share :: e a -> (e a -> e b) -> e b
 
 
-class Category cat => AppS cat where
-  multS :: cat s a -> cat s b -> cat s (a, b)
-  unitS :: cat s ()
+-- class Category cat => AppS cat where
+--   multS :: cat s a -> cat s b -> cat s (a, b)
+--   unitS :: cat s ()
 
-  headS :: cat (Env Identity (a ': as)) a
-  tailS :: cat (Env Identity (a ': as)) (Env Identity as)
+--   headS :: cat (Env Identity (a ': as)) a
+--   tailS :: cat (Env Identity (a ': as)) (Env Identity as)
 
-  singletonS :: cat a (Env Identity '[a])
+--   singletonS :: cat a (Env Identity '[a])
 
-  econsS :: cat (a , Env Identity as) (Env Identity (a ': as))
+--   econsS :: cat (a , Env Identity as) (Env Identity (a ': as))
 
-
-instance AppS IFq where
+instance Cartesian IFq where
   multS = multIFq
   unitS = IFq IsNoneTrue (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| () ||], CNone))
 
-  headS = IFq IsNoneTrue
-              (\as    -> do { v <- mkLet [|| case $$as of { ECons (Identity a) _ -> a } ||] ; return (v, CNone)})
-              (\das _ -> do { vda <- mkLet [|| case $$das of { ECons (PackedDelta da) _ -> da } ||]; return (vda, CNone) } )
+  fstS _ _ = IFq IsNoneTrue
+                (\as    -> do { v <- mkLet [|| case $$as of { (a, _) -> a } ||] ; return (v, CNone)})
+                (\das _ -> do { vda <- mkLet [|| case $$das of { (da,_) -> da } ||]; return (vda, CNone) } )
 
-  tailS = IFq IsNoneTrue
-              (\as    -> do { v <- mkLet [|| case $$as of { ECons _ as' -> as' } ||] ; return (v, CNone)})
-              (\das _ -> do { v <- mkLet [|| case $$das of { ECons _ das' -> das' } ||]; return (v, CNone) } )
+  sndS _ _ = IFq IsNoneTrue
+                (\as    -> do { v <- mkLet [|| case $$as of { (_, a) -> a } ||] ; return (v, CNone)})
+                (\das _ -> do { vda <- mkLet [|| case $$das of { (_, da) -> da } ||]; return (vda, CNone) } )
 
-  singletonS = IFq IsNoneTrue
-                   (\a  -> do { v <- mkLet [|| ECons (Identity $$a) ENil ||] ; return (v, CNone) })
-                   (\da _ -> do { v <- mkLet [|| ECons (PackedDelta $$da) ENil ||] ; return (v, CNone) })
+-- instance AppS IFq where
+--   multS = multIFq
+--   unitS = IFq IsNoneTrue (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| () ||], CNone))
 
-  econsS = IFq IsNoneTrue econs decons
-    where
-      econs x = do { v <- mkLet [|| case $$x of { (a, as) -> ECons (Identity a) as } ||]; return (v, CNone) }
-      decons x _ = do { v <- mkLet [|| case $$x of { (da, das) -> ECons (PackedDelta da) das } ||]; return (v, CNone) }
+--   headS = IFq IsNoneTrue
+--               (\as    -> do { v <- mkLet [|| case $$as of { ECons (Identity a) _ -> a } ||] ; return (v, CNone)})
+--               (\das _ -> do { vda <- mkLet [|| case $$das of { ECons (PackedDelta da) _ -> da } ||]; return (vda, CNone) } )
 
-instance AppS cat => App cat (Sem cat) where
-  lift x (Sem e) = Sem $ \tenv -> x . e tenv
+--   tailS = IFq IsNoneTrue
+--               (\as    -> do { v <- mkLet [|| case $$as of { ECons _ as' -> as' } ||] ; return (v, CNone)})
+--               (\das _ -> do { v <- mkLet [|| case $$das of { ECons _ das' -> das' } ||]; return (v, CNone) } )
 
-  unit = Sem $ const unitS
-  pair (Sem e1) (Sem e2) = Sem $ \tenv -> multS (e1 tenv) (e2 tenv)
+--   singletonS = IFq IsNoneTrue
+--                    (\a  -> do { v <- mkLet [|| ECons (Identity $$a) ENil ||] ; return (v, CNone) })
+--                    (\da _ -> do { v <- mkLet [|| ECons (PackedDelta $$da) ENil ||] ; return (v, CNone) })
 
-  -- share (Sem e0) k = Sem $ \tenv ->
-  --   let tenva = ECons Proxy tenv
-  --       arg = Sem $ \tenv' -> diffS tenva tenv' headS
-  --   in runSem (k arg) tenva . econsS . multS (e0 tenv) id
+--   econsS = IFq IsNoneTrue econs decons
+--     where
+--       econs x = do { v <- mkLet [|| case $$x of { (a, as) -> ECons (Identity a) as } ||]; return (v, CNone) }
+--       decons x _ = do { v <- mkLet [|| case $$x of { (da, das) -> ECons (PackedDelta da) das } ||]; return (v, CNone) }
 
-diffS :: AppS cat => Env Proxy as -> Env Proxy bs -> cat (Env Identity as) a -> cat (Env Identity bs) a
-diffS tenv1 tenv2 | trace (printf "Diff: #tenv1 = %d and #tenv2 = %d" (lenEnv tenv1) (lenEnv tenv2)) False = undefined
-diffS tenv1 tenv2 =
-  diff' (lenEnv tenv2 - lenEnv tenv1) tenv1 tenv2
-  where
-    diff' :: AppS cat => Int -> Env Proxy xs -> Env Proxy ys -> cat (Env Identity xs) a -> cat (Env Identity ys) a
-    diff' 0 _ _ x             = Unsafe.unsafeCoerce x
-    diff' n γ1 (ECons _ γ2) x = diff' (n-1) γ1 γ2 x . tailS
-    diff' _ _ _ _             = error "Unreachable"
+-- instance AppS cat => App cat (Sem cat) where
+--   lift x (Sem e) = Sem $ \tenv -> x . e tenv
 
-runAppMono :: AppS cat => (Sem cat a -> Sem cat b) -> cat a b
-runAppMono f = runSem (f $ Sem $ \tenv -> diffS tenv1 tenv headS) tenv1 . singletonS
-  where
-    tenv1 = ECons Proxy ENil
+--   unit = Sem $ const unitS
+--   pair (Sem e1) (Sem e2) = Sem $ \tenv -> multS (e1 tenv) (e2 tenv)
+
+--   -- share (Sem e0) k = Sem $ \tenv ->
+--   --   let tenva = ECons Proxy tenv
+--   --       arg = Sem $ \tenv' -> diffS tenva tenv' headS
+--   --   in runSem (k arg) tenva . econsS . multS (e0 tenv) id
+
+-- diffS :: AppS cat => Env Proxy as -> Env Proxy bs -> cat (Env Identity as) a -> cat (Env Identity bs) a
+-- diffS tenv1 tenv2 | trace (printf "Diff: #tenv1 = %d and #tenv2 = %d" (lenEnv tenv1) (lenEnv tenv2)) False = undefined
+-- diffS tenv1 tenv2 =
+--   diff' (lenEnv tenv2 - lenEnv tenv1) tenv1 tenv2
+--   where
+--     diff' :: AppS cat => Int -> Env Proxy xs -> Env Proxy ys -> cat (Env Identity xs) a -> cat (Env Identity ys) a
+--     diff' 0 _ _ x             = Unsafe.unsafeCoerce x
+--     diff' n γ1 (ECons _ γ2) x = diff' (n-1) γ1 γ2 x . tailS
+--     diff' _ _ _ _             = error "Unreachable"
+
+-- runAppMono :: AppS cat => (Sem cat a -> Sem cat b) -> cat a b
+-- runAppMono f = runSem (f $ Sem $ \tenv -> diffS tenv1 tenv headS) tenv1 . singletonS
+--   where
+--     tenv1 = ECons Proxy ENil
+
+
+runAppMono :: Cartesian cat => (TSem (TermFromCat cat) a -> TSem (TermFromCat cat) b) -> cat a b
+runAppMono = runMono
 
 
 ave :: App IFq e => (e (Bag Double) -> e Double)
@@ -672,57 +680,55 @@ dumpCode c = do
 
 The following is the generated code for `runIFq (runAppMono ave)`
 
-   (ensureDiffType
-       $ (\ pa_a18gW pb_a18gX a_a18gY
-            -> let v_a18gZ = (ECons (Identity a_a18gY)) ENil in
-               let
-                 v_a18h0
-                   = case v_a18gZ of { ECons (Identity a_a18h1) _ -> a_a18h1 } in
-               let v_a18h2 = case v_a18h0 of { Bag as_a18h3 -> sum as_a18h3 } in
-               let
-                 v_a18h4
-                   = case v_a18gZ of { ECons (Identity a_a18h5) _ -> a_a18h5 } in
-               let
-                 v_a18h6 = case v_a18h4 of { Bag as_a18h7 -> length as_a18h7 } in
-               let v_a18h8 = fromIntegral v_a18h6 :: Double in
-               let v_a18h9 = (v_a18h2, v_a18h8) in
-               let v_a18ha = (uncurry (/)) v_a18h9
+(ensureDiffType
+       $ (\ pa_anpS pb_anpT a_anpU
+            -> let v_anpV = (a_anpU, ()) in
+               let v_anpW = case v_anpV of { (a_anpX, _) -> a_anpX } in
+               let v_anpY = case v_anpW of { Bag as_anpZ -> sum as_anpZ } in
+               let v_anq0 = case v_anpV of { (a_anq1, _) -> a_anq1 } in
+               let v_anq2 = case v_anq0 of { Bag as_anq3 -> length as_anq3 } in
+               let v_anq4 = fromIntegral v_anq2 :: Double in
+               let v_anq5 = (v_anpY, v_anq4) in
+               let v_anq6 = (uncurry (/)) v_anq5
                in
-                 (v_a18ha,
+                 (v_anq6,
                   let
-                    func_a18hb cp_a18hc
-                      = ((mkInteraction pa_a18gW) pb_a18gX
-                           $ (\ da_a18hd
-                                -> let v_a18he = (DECons da_a18hd) DENil in
-                                   let
-                                     v_a18hf = case v_a18he of { DECons da_a18hg _ -> da_a18hg } in
-                                   let
-                                     v_a18hh
-                                       = case v_a18hf of { Bag as'_a18hi -> Sum (sum as'_a18hi) } in
-                                   let
-                                     v_a18hj = case v_a18he of { DECons da_a18hk _ -> da_a18hk } in
-                                   let
-                                     v_a18hl
-                                       = case v_a18hj of {
-                                           Bag as_a18hm -> Sum (length as_a18hm) } in
-                                   let v_a18hn = Sum (fromIntegral (getSum v_a18hl) :: Double) in
-                                   let v_a18ho = (v_a18hh, v_a18hn) in
-                                   let
-                                     v_a18hp
-                                       = let
-                                           (x_a18hs, y_a18ht)
-                                             = runIdentity (unCOne (unCNE cp_a18hc))
-                                           (dx_a18hq, dy_a18hr) = v_a18ho
-                                         in
-                                           (Sum
-                                              $ (((x_a18hs /+ dx_a18hq) / (y_a18ht /+ dy_a18hr))
-                                                   - (x_a18hs / y_a18ht))) in
-                                   let v_a18hu = (runIdentity (unCOne (unCNE cp_a18hc)) /+ v_a18ho)
-                                   in (v_a18hp, func_a18hb (CNE (COne (Identity v_a18hu))))))
-                  in func_a18hb (CNE (COne (Identity v_a18h9))))))
+                    func_anq7
+                      = \ a_anq8
+                          -> ((mkInteraction pa_anpS) pb_anpT
+                                $ (\ da_anq9
+                                     -> let v_anqa = (da_anq9, ()) in
+                                        let v_anqb = case v_anqa of { (da_anqc, _) -> da_anqc } in
+                                        let
+                                          v_anqd
+                                            = case v_anqb of {
+                                                Bag as'_anqe -> Sum (sum as'_anqe) } in
+                                        let v_anqf = case v_anqa of { (da_anqg, _) -> da_anqg } in
+                                        let
+                                          v_anqh
+                                            = case v_anqf of {
+                                                Bag as_anqi -> Sum (length as_anqi) } in
+                                        let v_anqj = Sum (fromIntegral (getSum v_anqh) :: Double) in
+                                        let v_anqk = (v_anqd, v_anqj) in
+                                        let
+                                          v_anql
+                                            = let
+                                                (x_anqo, y_anqp) = a_anq8
+                                                (dx_anqm, dy_anqn) = v_anqk
+                                              in
+                                                (Sum
+                                                   $ (((x_anqo /+ dx_anqm) / (y_anqp /+ dy_anqn))
+                                                        - (x_anqo / y_anqp))) in
+                                        let v_anqq = (a_anq8 /+ v_anqk)
+                                        in (v_anql, func_anq7 v_anqq)))
+                  in func_anq7 v_anq5)))
 
-This code unfortunately does not type check due to the separate use of ECons and DECons; we are not able to know such intermediates
-types are related by `Delta`.
+Issue: the code involves redundant manipulations of products, such as:
+
+      ...
+               let v_anpV = (a_anpU, ()) in
+               let v_anpW = case v_anpV of { (a_anpX, _) -> a_anpX } in
+      ...
 
 -}
 
@@ -765,94 +771,11 @@ TODO: how such ideas can be related to operad?
 
 -}
 
-data Sig2 k = SO [k] k
-type ts ~> t = 'SO ts t
-
--- | Fun e ('[t1,...,tn] ~> t) ~ (e t1, ... ,e tn) -> e t
-data Fun (e :: k -> Type) (s :: Sig2 k) :: Type  where
-  Fun :: Env Proxy ts -> (Env e ts -> e r) -> Fun e (ts ~> r)
-
-{-
- Abs :: Fun (e t ) (ts ~> r) Fun e ((a ': ts) ~> r)
--}
-
-data TermF term env (s :: Sig2 k) :: Type where
-  TermF :: term (Append ts env) r -> TermF term env (ts ~> r)
-
-class Category cat => Term unit prod cat (term :: [k] -> k -> Type) | term -> cat, cat -> term, term -> unit, term -> prod, cat -> unit, cat -> prod  where
-  -- prop> mapTerm (f . g) = mapTerm f . mapTerm g
-  mapTerm  :: cat a b -> term s a -> term s b
-
-  multTerm :: term s a -> term s b -> term s (prod a b)
-  unitTerm :: term s unit
-
-  var0Term   :: term (a ': s) a
-  weakenTerm :: term s a -> term (b ': s) a
-
---  letTerm    :: term s a -> term (a ': s) b -> term s b
-  unliftTerm :: term '[a] b -> cat a b
-
-newtype TSem term b = TSem { runTSem :: forall as. Env Proxy as -> term as b }
 
 
-instance Term () (,) cat term => App cat (TSem term) where
-  lift x (TSem e) = TSem $ \tenv -> mapTerm x (e tenv)
 
-  unit = TSem $ const unitTerm
-  pair (TSem e1) (TSem e2) = TSem $ \tenv -> multTerm (e1 tenv) (e2 tenv)
-
-  -- share (TSem e0) k = TSem $ \tenv ->
-  --   let tenva = ECons Proxy tenv
-  --       arg = TSem $ \tenv' -> diffT tenva tenv' var0Term
-  --   in letTerm (e0 tenv) (runTSem (k arg) tenva)
-
-class App2 (term :: [k] -> k -> Type) (e :: k -> Type) | e -> term where
-  liftSO :: (forall p. Env (TermF term p) ss -> term p r)
-            -> Env (Fun e) ss -> e r
-
-
-instance Term () (,) cat term => App2 term (TSem term) where
-  liftSO comb ks = TSem $ \tenv -> comb (mapEnv (convert tenv) ks)
-    where
-      convert :: forall as a. Env Proxy as -> Fun (TSem term) a -> TermF term as a
-      convert tenv (Fun etenv f) = TermF $ runTSem (f $ makeArgs Proxy Proxy extendedTEnv id etenv) extendedTEnv
-        where
-          -- essentially makes
-          --   [trans x0, trans x1, trans x2, ..., trans xn]
-          -- where xi refers ith de Bruin index, and trans e = TSem $ \tenv' -> diffT extended tenv' e
-          makeArgs :: forall ets ts. Proxy ets -> Proxy as
-                      -> Env Proxy ets
-                      -> (forall b. term (Append ts as) b -> term ets b)
-                      -> Env Proxy ts -> Env (TSem term) ts
-          makeArgs _ _ _ _ ENil = ENil
-          makeArgs pHs (pAs :: Proxy as) extended weaken (ECons (_ :: Proxy b) (argTypes :: Env Proxy argTys)) =
-            let arg :: TSem term b
-                arg = TSem $ \tenv' -> diffT extended tenv' (weaken $ var0Term @Type @() @(,) @cat @term)
-            in ECons arg $ makeArgs pHs pAs extended (weaken . weakenTerm)  argTypes
-
-          extendedTEnv = appendEnv etenv tenv
-
-
---      convert tenv f = TermF (convert' tenv f)
-
-      -- convert' :: Env Proxy as -> Fun (TSem term) (ts ~> r) -> term (Append ts as) r
-      -- convert' tenv (Body body) = _
-      -- convert' tenv (Abs f)     = _
-
-diffT :: Term unit prod cat term => Env Proxy as -> Env Proxy bs -> term as a -> term bs a
-diffT tenv1 tenv2 | trace (printf "Diff: #tenv1 = %d and #tenv2 = %d" (lenEnv tenv1) (lenEnv tenv2)) False = undefined
-diffT tenv1 tenv2 =
-  diff' (lenEnv tenv2 - lenEnv tenv1) tenv1 tenv2
-  where
-    diff' :: Term unit prod cat term => Int -> Env Proxy xs -> Env Proxy ys -> term xs a -> term ys a
-    diff' 0 _ _ x             = Unsafe.unsafeCoerce x
-    diff' n γ1 (ECons _ γ2) x = weakenTerm $ diff' (n-1) γ1 γ2 x
-    diff' _ _ _ _             = error "Unreachable"
-
-runAppMono' :: Term unit prod cat term => (TSem term a -> TSem term b) -> cat a b
-runAppMono' f = unliftTerm $ runTSem (f $ TSem $ \tenv -> diffT tenv1 tenv var0Term) tenv1
-  where
-    tenv1 = ECons Proxy ENil
+runAppMono' :: Term cat term => (TSem term a -> TSem term b) -> cat a b
+runAppMono' = runMono
 
 newtype PackedCodeDelta a = PackedCodeDelta { getCodeDelta :: Code (Delta a) }
 
@@ -861,7 +784,11 @@ data IFqT as b =
                   (Env PackedCode as -> CodeC (Code b, Conn PackedCode cs))
                   (Env PackedCodeDelta as -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
 
-instance Term () (,) IFq IFqT where
+instance HasProduct IFq where
+  type Unit IFq = ()
+  type Prod IFq a b = (a, b)
+
+instance Term IFq IFqT where
   mapTerm (IFq isNone2 f2 tr2) (IFqT isNone1 f1 tr1) = IFqT (isNoneAnd isNone1 isNone2) f tr
     where
       f a = do
@@ -1023,22 +950,25 @@ appF :: App IFq e => e (Bag Double) -> e (Bag Double) -> e (Bag Double)
 appF x y = lift appC (pair x y)
 
 -- FIXME: tentative
-share :: App2 IFqT e => e r1 -> (e r1 -> e r2) -> e r2
-share e k = liftSO (\(ECons (TermF e1) (ECons (TermF e2) ENil)) -> letTermIFqT e1 e2) (ECons (Fun ENil (\ENil -> e)) (ECons (Fun (ECons Proxy ENil) (\(ECons x ENil) -> k x)) ENil))
+share :: forall e r1 r2. App2 IFq IFqT e => e r1 -> (e r1 -> e r2) -> e r2
+share = liftSO2 (Proxy @'[ '[], '[r1] ] ) letTermIFqT
+  -- _ $ liftSO (packTermF letTermIFqT)
+  -- liftSO (packTermF letTermIFqT) (ECons (Fun ENil (\ENil -> e)) (ECons (Fun (ECons Proxy ENil) (\(ECons x ENil) -> k x)) ENil))
+  -- liftSO (\(ECons (TermF e1) (ECons (TermF e2) ENil)) -> letTermIFqT e1 e2) (ECons (Fun ENil (\ENil -> e)) (ECons (Fun (ECons Proxy ENil) (\(ECons x ENil) -> k x)) ENil))
 
-cascadeAppS :: (App IFq e, App2 IFqT e) => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
+cascadeAppS :: (App2 IFq IFqT e) => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
 cascadeAppS 0 x f = f x
 cascadeAppS n x f = share (appF x x) $ \y -> cascadeAppS (n-1) y f
 
-cascadeAppC :: (App IFq e, App2 IFqT e) => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
+cascadeAppC :: (App2 IFq IFqT e) => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
 cascadeAppC 0 x f = f x
 cascadeAppC n x f = let y = appF x x in cascadeAppC (n-1) y f
 
 
-aveDupDup :: (App IFq e, App2 IFqT e) => e (Bag Double) -> e Double
+aveDupDup :: (App2 IFq IFqT e) => e (Bag Double) -> e Double
 aveDupDup x = cascadeAppS 4 x ave
 
-aveDupDup' :: (App IFq e, App2 IFqT e) => e (Bag Double) -> e Double
+aveDupDup' :: (App2 IFq IFqT e) => e (Bag Double) -> e Double
 aveDupDup' x = cascadeAppC 4 x ave
 
 {-

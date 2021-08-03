@@ -1,9 +1,10 @@
-{-# LANGUAGE DataKinds     #-}
-{-# LANGUAGE GADTs         #-}
-{-# LANGUAGE PolyKinds     #-}
-{-# LANGUAGE RankNTypes    #-}
-{-# LANGUAGE TypeFamilies  #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds       #-}
+{-# LANGUAGE GADTs           #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PolyKinds       #-}
+{-# LANGUAGE RankNTypes      #-}
+{-# LANGUAGE TypeFamilies    #-}
+{-# LANGUAGE TypeOperators   #-}
 
 module Data.Env where
 
@@ -12,6 +13,11 @@ import           Data.Kind (Type)
 data Env (f :: k -> Type) (as :: [k]) where
   ENil  :: Env f '[]
   ECons :: f a -> Env f as -> Env f (a ': as)
+
+pattern (:>) :: () => (rs ~ (a : as)) => f a -> Env f as -> Env f rs
+pattern a :> as = ECons a as
+
+infixr 5 :>
 
 mapEnv :: (forall a. f a -> g a) -> Env f as -> Env g as
 mapEnv _ ENil         = ENil
