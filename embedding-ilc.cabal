@@ -30,7 +30,9 @@ common deps
 
 library
     import: deps 
-    exposed-modules:  EILC
+    exposed-modules:  
+        Data.Env        
+        EILC
 
     -- Modules included in this library but not exported.
     -- other-modules:

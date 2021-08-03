@@ -32,11 +32,15 @@ import           Debug.Trace           (trace)
 import qualified Language.Haskell.TH   as TH
 import           Text.Printf           (printf)
 
+import           Data.Env
+
+
 type family Delta (a :: Type) :: Type
 
 type instance Delta (Identity a) = Delta a
 type instance Delta () = ()
 type instance Delta (a, b) = (Delta a, Delta b)
+
 
 class Monoid (Delta a) => Diff a where
   -- | Applying delta.
@@ -107,17 +111,6 @@ class Incr e where
 
   pairI :: e a -> e b -> e (a, b)
 
-data Env f as where
-  ENil  :: Env f '[]
-  ECons :: f a -> Env f as -> Env f (a ': as)
-
-mapEnv :: (forall a. f a -> g a) -> Env f as -> Env g as
-mapEnv _ ENil         = ENil
-mapEnv h (ECons x xs) = ECons (h x) (mapEnv h xs)
-
-lenEnv :: Env f as -> Int
-lenEnv ENil        = 0
-lenEnv (ECons _ r) = 1 + lenEnv r
 
 data DEnv f as where
   DENil :: DEnv f '[]
@@ -783,17 +776,8 @@ data Fun (e :: k -> Type) (s :: Sig2 k) :: Type  where
  Abs :: Fun (e t ) (ts ~> r) Fun e ((a ': ts) ~> r)
 -}
 
-type family Append (xs :: [k]) (ys :: [k]) where
-  Append '[] ys       = ys
-  Append (x ': xs) ys = x ': Append xs ys
-
-appendEnv :: Env f xs -> Env f ys -> Env f (Append xs ys)
-appendEnv ENil ys         = ys
-appendEnv (ECons x xs) ys = ECons x (appendEnv xs ys)
-
 data TermF term env (s :: Sig2 k) :: Type where
   TermF :: term (Append ts env) r -> TermF term env (ts ~> r)
-
 
 class Category cat => Term unit prod cat (term :: [k] -> k -> Type) | term -> cat, cat -> term, term -> unit, term -> prod, cat -> unit, cat -> prod  where
   -- prop> mapTerm (f . g) = mapTerm f . mapTerm g
