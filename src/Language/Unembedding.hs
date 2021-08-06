@@ -143,7 +143,7 @@ instance (asp ~ Append as p, s ~ (as ~> a), PackTermF term p ss r res) => PackTe
 -- share = liftSO2 (Proxy '[ '[], '[a] ]) letTm
 -- @
 --
--- FIXME: It is ugly to use Proxy.
+-- FIXME: It is ugly to use Proxy, but I do not like AllowAmbiguousTypes
 -- FIXME: Use TH to generate liftSO4, liftSO5, ...
 
 liftSO1 ::
