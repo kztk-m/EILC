@@ -33,7 +33,7 @@ Recall that we interpret terms-in-context `Γ |- e : A` as
 Then, our task is: 
 
     ∃C. (Γ -> Sequence A × C) × (ΔΓ × C -> Δ(Sequence A) × C) 
-    ∃C. (Γ × A -> A × C) × (ΔΓ × ΔA × C -> ΔB × C)
+    ∃C. (Γ × A -> B × C) × (ΔΓ × ΔA × C -> ΔB × C)
     -----------------------------------------------------------
     ∃C. (Γ -> Sequence B × C) × (ΔΓ × C -> Δ(Sequence B) × C) 
 
@@ -57,6 +57,17 @@ and solved straightforwardly by taking `[A,B] = A -> B` and `Δ[A,B] = A -> ΔA 
 Anyway, we are able to use the host language's higher-order functions, which essentially interprets the host system in presheaf (in an enriched category). 
 
 Also, we can handle 2nd order APIs, which would be useful for the uses cases discussed by Giarrusso et al.'s (**Really?**). 
+
+### Note on Aug 6. 
+
+    (Γ -> Sequence A × C1) × (ΔΓ × C1 -> Δ(Sequence A) × C1) 
+    (Γ × A -> B × C2) × (ΔΓ × ΔA × C2 -> ΔB × C2)
+    -----------------------------------------------------------
+    ∃C. (Γ -> Sequence B × C) × (ΔΓ × C -> Δ(Sequence B) × C) 
+
+Having this function is possible; to do so we will take Γ × C1 × Sequence C2. 
+Γ is required as we need to run a function of type `A -> B × C2`. We collect the produced C2 to make `Sequence C2`. 
+
 
 ## General I/F 
 

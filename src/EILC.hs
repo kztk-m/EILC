@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds            #-}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -19,7 +20,6 @@
 
 module EILC where
 
-import           Control.Category      (Category (..))
 import           Data.Coerce           (coerce)
 import           Data.Functor.Identity
 import           Data.Monoid           (Sum (..))
@@ -64,7 +64,7 @@ data IF a b = forall c. IF !(a -> (b, c)) !(Delta a -> c -> (Delta b, c))
 -- simplarly to IF but a is applied partially beforehand
 data IV a b = forall c. IV !(b, c) !(Delta a -> c -> (Delta b, c))
 
-instance Category IF where
+instance CategoryK IF where
   id = IF (\a -> (a, ())) (\da c -> (da , c))
 
   IF f2 tr2 . IF f1 tr1 = IF f tr
@@ -159,50 +159,7 @@ runIncrMono f = runUnembIncr (shareI (UnembIncr $ \(ECons Proxy _) -> Unsafe.uns
     singleton = IF (\a -> (ECons (Identity a) ENil, ()))
                    (\da _ -> (ECons (PackedDelta da) ENil, ()))
 
-newtype Bag a = Bag [a] deriving (Monoid, Semigroup)
-type instance Delta (Bag a) = Bag a -- only insertion is considered.
 
-instance Diff (Bag a) where
-  Bag xs /+ Bag ys = Bag (ys ++ xs)
-
-type instance Delta Int    = Sum Int
-type instance Delta Double = Sum Double
-
-instance Diff Int where
-  a /+ da = a + getSum da
-
-instance Diff Double where
-  a /+ da = a + getSum da
-
-sumD :: Bag Double -> Delta (Bag Double) -> Delta Double
-sumD _ (Bag xs) = Sum $ Prelude.sum xs
-
-lenD :: Bag Double -> Delta (Bag Double) -> Delta Int
-lenD _ (Bag xs) = Sum $ length xs
-
-i2d :: Int -> Double
-i2d = fromIntegral
-
-i2dD :: Int -> Delta Int -> Delta Double
-i2dD _ d = Sum $ fromIntegral $ getSum d
-
-divD :: (Double, Double) -> (Delta Double, Delta Double) -> Delta Double
-divD (x, y) (dx, dy) = Sum $ (x /+ dx) / (y /+ dy) - x / y
-
-sumF :: Incr e => e (Bag Double) -> e Double
-sumF = liftI (\(Bag xs) -> sum xs) sumD
-
-lenF :: Incr e => e (Bag Double) -> e Int
-lenF = liftI (\(Bag xs) -> length xs) lenD
-
-i2dF :: Incr e => e Int -> e Double
-i2dF = liftI i2d i2dD
-
-divF :: Incr e => e (Double, Double) -> e Double
-divF = liftI (uncurry (/)) divD
-
-aveD :: Incr e => e (Bag Double) -> e Double
-aveD x = shareI x $ \y -> divF (pairI (sumF y) (i2dF (lenF y)))
 
 -- >>> let (res, tr) = runIF (runIncrMono aveD) (Bag [1..100])
 -- >>> res
@@ -280,7 +237,7 @@ decompConn IsNoneFalse IsNoneFalse (CNE (CJoin x y)) = (CNE x, CNE y)
 
 data IFt a b = forall cs. IFt (IsNone cs) (a -> (b, Conn Identity cs)) (Delta a -> Conn Identity cs -> (Delta b, Conn Identity cs))
 
-instance Category IFt where
+instance CategoryK IFt where
   id = IFt IsNoneTrue (\a -> (a, CNone)) (\da c -> (da, c))
 
   IFt isNone2 f2 tr2 . IFt isNone1 f1 tr1 = IFt (isNoneAnd isNone1 isNone2) f tr
@@ -368,37 +325,55 @@ mkLetConn (CNE e) = CNE <$> mkLetConn' e
     mkLetConn' (COne a)      = COne . PackedCode <$> mkLet (coerce a)
     mkLetConn' (CJoin c1 c2) = CJoin <$> mkLetConn' c1 <*> mkLetConn' c2
 
-data IFq a b =
-  forall cs. IFq (IsNone cs)
-                 (Code a -> CodeC (Code b, Conn PackedCode cs))
-                 (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
 
-instance Category IFq where
-  id = IFq IsNoneTrue (\a -> return (a, CNone))
-                      (\da _ -> return (da, CNone))
+isNone :: Conn Proxy cs -> IsNone cs
+isNone CNone   = IsNoneTrue
+isNone (CNE _) = IsNoneFalse
 
-  IFq isNone2 f2 tr2 . IFq isNone1 f1 tr1 = IFq (isNoneAnd isNone1 isNone2) f tr
+-- data IFq a b =
+--   forall cs.
+--     IFq (Conn Proxy cs)
+--         (Code a -> CodeC (Code b, Conn PackedCode cs))
+--         (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
+
+data IFq a b where
+  IFq :: Conn Proxy cs -> (Code a -> CodeC (Code b, Conn PackedCode cs)) -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs)) -> IFq a b
+
+instance CategoryK IFq where
+  type K IFq = Diff
+  id = IFq CNone (\a -> return (a, CNone))
+                 (\da _ -> return (da, CNone))
+
+  IFq sh2 f2 tr2 . IFq sh1 f1 tr1 = IFq (joinConn sh1 sh2) f tr
     where
       f a = do
         (b, c1) <- f1 a
         (c, c2) <- f2 b
         return (c, joinConn c1 c2)
 
-      tr da cc | (c1, c2) <- decompConn isNone1 isNone2 cc = do
+      tr da cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
         (db, c1') <- tr1 da c1
         (dc, c2') <- tr2 db c2
         return (dc, joinConn c1' c2')
 
 ifqFromStateless :: (Code a -> Code b) -> (Code (Delta a) -> Code (Delta b)) -> IFq a b
-ifqFromStateless f df = IFq IsNoneTrue (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df da) ; return (v, CNone) })
+ifqFromStateless f df = IFq CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df da) ; return (v, CNone) })
 
 ifqFromD :: Diff a => (Code a -> Code b) -> (Code a -> Code (Delta a) -> Code (Delta b)) -> IFq a b
-ifqFromD f df = IFq IsNoneFalse
+ifqFromD f df = IFq (CNE (COne Proxy))
                     (\a -> do { v <- mkLet (f a) ; return (v, CNE (COne (PackedCode a))) })
                     (\da (CNE (COne (PackedCode a))) -> do { v <- mkLet (df a da) ; a' <- mkLet [|| $$a /+ $$da ||] ; return (v, CNE (COne (PackedCode a'))) })
 
+ifqFromFunctions :: Code (a -> (b, c)) -> Code (Delta a -> c -> (Delta b, c)) -> IFq a b
+ifqFromFunctions f df =
+  IFq (CNE (COne Proxy))
+      (\a -> CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))) ) ||])
+      (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
+        [|| let (db, c') = $$df $$da $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
+
+
 multIFq :: IFq s a -> IFq s b -> IFq s (a, b)
-multIFq (IFq isNone1 f1 tr1) (IFq isNone2 f2 tr2) = IFq (isNoneAnd isNone1 isNone2) f tr
+multIFq (IFq sh1 f1 tr1) (IFq sh2 f2 tr2) = IFq (joinConn sh1 sh2) f tr
   where
     f s = do
       (a, c1) <- f1 s
@@ -406,7 +381,7 @@ multIFq (IFq isNone1 f1 tr1) (IFq isNone2 f2 tr2) = IFq (isNoneAnd isNone1 isNon
       r <- mkLet [|| ($$a, $$b) ||]
       return (r , joinConn c1 c2)
 
-    tr ds cc | (c1, c2) <- decompConn isNone1 isNone2 cc = do
+    tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
       (da, c1') <- tr1 ds c1
       (db, c2') <- tr2 ds c2
       r <- mkLet [|| ($$da, $$db) ||]
@@ -431,21 +406,21 @@ unCOne (COne c) = c
 unCJoin :: NEConn f ('NEJoin c1 c2) -> (NEConn f c1, NEConn f c2)
 unCJoin (CJoin c1 c2) = (c1, c2)
 
-dumpIFq :: IFq a b -> IO ()
-dumpIFq (IFq IsNoneTrue f tr) = do
-  putStrLn "IsNone: True"
-  e <- TH.runQ [|| \x -> $$(runCodeC (f [|| x ||]) fst ) ||]
-  putStrLn "=== f ==="
-  putStrLn $ TH.pprint $ TH.unType e
-  de <- TH.runQ [|| \x -> $$(runCodeC (tr [|| x ||] CNone) fst) ||]
-  putStrLn "=== df ==="
-  putStrLn $ TH.pprint $ TH.unType de
-dumpIFq (IFq IsNoneFalse f _) = do
-  putStrLn "IsNone: False"
-  putStrLn "=== <f, c> ==="
-  e <- TH.runQ [|| \x -> $$( runCodeC (f [|| x ||]) $ \(y, c) -> [|| ($$y , $$(conn2code c)) ||]) ||]
-  putStrLn $ TH.pprint $ TH.unType e
-  putStrLn "printing df is not implemented"
+-- dumpIFq :: IFq a b -> IO ()
+-- dumpIFq (IFq IsNoneTrue f tr) = do
+--   putStrLn "IsNone: True"
+--   e <- TH.runQ [|| \x -> $$(runCodeC (f [|| x ||]) fst ) ||]
+--   putStrLn "=== f ==="
+--   putStrLn $ TH.pprint $ TH.unType e
+--   de <- TH.runQ [|| \x -> $$(runCodeC (tr [|| x ||] CNone) fst) ||]
+--   putStrLn "=== df ==="
+--   putStrLn $ TH.pprint $ TH.unType de
+-- dumpIFq (IFq IsNoneFalse f _) = do
+--   putStrLn "IsNone: False"
+--   putStrLn "=== <f, c> ==="
+--   e <- TH.runQ [|| \x -> $$( runCodeC (f [|| x ||]) $ \(y, c) -> [|| ($$y , $$(conn2code c)) ||]) ||]
+--   putStrLn $ TH.pprint $ TH.unType e
+--   putStrLn "printing df is not implemented"
 
 conn2code :: Conn PackedCode cs -> Code (Conn Identity cs)
 conn2code CNone   = [|| CNone ||]
@@ -454,6 +429,7 @@ conn2code (CNE c) = [|| CNE $$(conn2code' c) ||]
 conn2code' :: NEConn PackedCode cs -> Code (NEConn Identity cs)
 conn2code' (COne (PackedCode c)) = [|| COne (Identity $$c) ||]
 conn2code' (CJoin c1 c2)         = [|| CJoin $$(conn2code' c1) $$(conn2code' c2) ||]
+
 
 code2conn :: forall cs r. Conn Proxy cs -> Code (Conn Identity cs) -> (Conn PackedCode cs -> Code r) -> Code r
 code2conn CNone      _ k = k CNone
@@ -584,13 +560,13 @@ prepare unembedded types for each C, we will prepare one type that works for all
 
 instance Cartesian IFq where
   multS = multIFq
-  unitS = IFq IsNoneTrue (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| () ||], CNone))
+  unitS = IFq CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| () ||], CNone))
 
-  fstS _ _ = IFq IsNoneTrue
+  fstS _ _ = IFq CNone
                 (\as    -> do { v <- mkLet [|| case $$as of { (a, _) -> a } ||] ; return (v, CNone)})
                 (\das _ -> do { vda <- mkLet [|| case $$das of { (da,_) -> da } ||]; return (vda, CNone) } )
 
-  sndS _ _ = IFq IsNoneTrue
+  sndS _ _ = IFq CNone
                 (\as    -> do { v <- mkLet [|| case $$as of { (_, a) -> a } ||] ; return (v, CNone)})
                 (\das _ -> do { vda <- mkLet [|| case $$das of { (_, da) -> da } ||]; return (vda, CNone) } )
 
@@ -642,33 +618,8 @@ instance Cartesian IFq where
 --     tenv1 = ECons Proxy ENil
 
 
-runAppMono :: Cartesian cat => (TSem (TermFromCat cat) a -> TSem (TermFromCat cat) b) -> cat a b
-runAppMono = runMono
-
-
-ave :: App IFq e => (e (Bag Double) -> e Double)
-ave = \x -> mysum x `mydiv` i2d (len x)
-  where
-    lenC :: IFq (Bag Double) Int
-    lenC = ifqFromStateless (\a  -> [|| case $$a of { Bag as -> length as } ||])
-                            (\da -> [|| case $$da of { Bag as -> Sum (length as) } ||])
-
-    i2dC :: IFq Int Double
-    i2dC = ifqFromStateless (\a -> [|| fromIntegral $$a :: Double ||]) (\da -> [|| Sum (fromIntegral (getSum $$da) :: Double) ||])
-
-    sumC :: IFq (Bag Double) Double
-    sumC = ifqFromStateless (\a  -> [|| case $$a of { Bag as -> sum as } ||])
-                            (\da -> [|| case $$da of { Bag as' -> Sum (sum as') } ||])
-
-    divC :: IFq (Double, Double) Double
-    divC = ifqFromD (\z -> [|| uncurry (/) $$z ||])
-                    (\z dz -> [|| let {(x, y) = $$z ; (dx, dy) = $$dz} in Sum $ (x /+ dx) / (y /+ dy) - x / y ||])
-
-    len = lift lenC
-    i2d = lift i2dC
-    mysum = lift sumC
-    mydiv x y = lift divC (pair x y)
-
+-- runAppMono :: Cartesian cat => (TSem (TermFromCat cat) a -> TSem (TermFromCat cat) b) -> cat a b
+-- runAppMono = runMono
 
 dumpCode :: Code a -> IO ()
 dumpCode c = do
@@ -774,13 +725,16 @@ TODO: how such ideas can be related to operad?
 
 
 
-runAppMono' :: Term cat term => (TSem term a -> TSem term b) -> cat a b
+runAppMono' :: (Term cat term, K cat a, K cat b) => (TSem cat term a -> TSem cat term b) -> cat a b
 runAppMono' = runMono
 
-newtype PackedCodeDelta a = PackedCodeDelta { getCodeDelta :: Code (Delta a) }
+-- newtype PackedCodeDelta a = PackedCodeDelta { getCodeDelta :: Code (Delta a) }
+data PackedCodeDelta a where
+  PackedCodeDelta :: Diff a => Code (Delta a) -> PackedCodeDelta a
 
 data IFqT as b =
-  forall cs. IFqT (IsNone cs)
+  forall cs. IFqT (Env Proxy as)
+                  (Conn Proxy cs)
                   (Env PackedCode as -> CodeC (Code b, Conn PackedCode cs))
                   (Env PackedCodeDelta as -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
 
@@ -788,20 +742,24 @@ instance HasProduct IFq where
   type Unit IFq = ()
   type Prod IFq a b = (a, b)
 
+  unitOk _ = Wit
+  prodOk _ _ _ = Wit
+
+
 instance Term IFq IFqT where
-  mapTerm (IFq isNone2 f2 tr2) (IFqT isNone1 f1 tr1) = IFqT (isNoneAnd isNone1 isNone2) f tr
+  mapTerm (IFq sh2 f2 tr2) (IFqT tenv sh1 f1 tr1) = IFqT tenv (joinConn sh1 sh2) f tr
     where
       f a = do
         (b, c1) <- f1 a
         (c, c2) <- f2 b
         return (c, joinConn c1 c2)
 
-      tr da cc | (c1, c2) <- decompConn isNone1 isNone2 cc = do
+      tr da cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
         (db, c1') <- tr1 da c1
         (dc, c2') <- tr2 db c2
         return (dc, joinConn c1' c2')
 
-  multTerm (IFqT isNone1 f1 tr1) (IFqT isNone2 f2 tr2) = IFqT (isNoneAnd isNone1 isNone2) f tr
+  multTerm (IFqT tenv sh1 f1 tr1) (IFqT _ sh2 f2 tr2) = IFqT tenv (joinConn sh1 sh2) f tr
     where
       f s = do
         (a, c1) <- f1 s
@@ -809,29 +767,31 @@ instance Term IFq IFqT where
         r <- mkLet [|| ($$a, $$b) ||]
         return (r , joinConn c1 c2)
 
-      tr ds cc | (c1, c2) <- decompConn isNone1 isNone2 cc = do
+      tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
         (da, c1') <- tr1 ds c1
         (db, c2') <- tr2 ds c2
         r <- mkLet [|| ($$da, $$db) ||]
         return ( r, joinConn c1' c2' )
 
-  unitTerm = IFqT IsNoneTrue (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| () ||], CNone))
+  unitTerm tenv = IFqT tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| () ||], CNone))
 
-  var0Term = IFqT IsNoneTrue (\(ECons (PackedCode a) _) -> return (a, CNone))
-                             (\(ECons (PackedCodeDelta da) _) _ -> return (da, CNone))
+  var0Term tenv = IFqT (ECons Proxy tenv)
+                       CNone
+                       (\(ECons (PackedCode a) _) -> return (a, CNone))
+                       (\(ECons (PackedCodeDelta da) _) _ -> return (da, CNone))
 
-  weakenTerm (IFqT i f tr) = IFqT i f' tr'
+  weakenTerm (IFqT tenv i f tr) = IFqT (ECons Proxy tenv) i f' tr'
     where
       f'  (ECons _ s) = f s
       tr' (ECons _ s) = tr s
 
-  unliftTerm (IFqT i f tr) = IFq i f' tr'
+  unliftTerm (IFqT _ i f tr) = IFq i f' tr'
     where
       f'  a  = f  (ECons (PackedCode       a) ENil)
       tr' da = tr (ECons (PackedCodeDelta da) ENil)
 
-letTermIFqT :: IFqT as b1 -> IFqT (b1 : as) b2 -> IFqT as b2
-letTermIFqT (IFqT isNone1 f1 tr1) (IFqT isNone2 f2 tr2) = IFqT (isNoneAnd isNone1 isNone2) f tr
+letTermIFqT :: Diff b1 => IFqT as b1 -> IFqT (b1 : as) b2 -> IFqT as b2
+letTermIFqT (IFqT tenv sh1 f1 tr1) (IFqT _ sh2 f2 tr2) = IFqT tenv (joinConn sh1 sh2) f tr
   where
     f s = do
       (a, c1) <- f1 s
@@ -839,7 +799,7 @@ letTermIFqT (IFqT isNone1 f1 tr1) (IFqT isNone2 f2 tr2) = IFqT (isNoneAnd isNone
       (b, c2) <- f2 (ECons (PackedCode v) s)
       return (b, joinConn c1 c2)
 
-    tr s cc | (c1, c2) <- decompConn isNone1 isNone2 cc = do
+    tr s cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
       (da, c1') <- tr1 s c1
       dv <- mkLet da
       (db, c2') <- tr2 (ECons (PackedCodeDelta dv) s) c2
@@ -943,33 +903,14 @@ Now, generated code for `ave` type checks.
 
 -}
 
-appC :: IFq (Bag Double, Bag Double) (Bag Double)
-appC = ifqFromStateless (\z -> [|| case $$z of { (Bag xs, Bag ys) -> Bag (xs ++ ys) } ||])
-                        (\dz -> [|| case $$dz of { (Bag dx, Bag dy) -> Bag (dx ++ dy) } ||])
-appF :: App IFq e => e (Bag Double) -> e (Bag Double) -> e (Bag Double)
-appF x y = lift appC (pair x y)
-
 -- FIXME: tentative
-share :: forall e r1 r2. App2 IFq IFqT e => e r1 -> (e r1 -> e r2) -> e r2
+share :: forall e r1 r2. (Diff r1, App2 IFq IFqT e) => e r1 -> (e r1 -> e r2) -> e r2
 share = liftSO2 (Proxy @'[ '[], '[r1] ] ) letTermIFqT
   -- _ $ liftSO (packTermF letTermIFqT)
   -- liftSO (packTermF letTermIFqT) (ECons (Fun ENil (\ENil -> e)) (ECons (Fun (ECons Proxy ENil) (\(ECons x ENil) -> k x)) ENil))
   -- liftSO (\(ECons (TermF e1) (ECons (TermF e2) ENil)) -> letTermIFqT e1 e2) (ECons (Fun ENil (\ENil -> e)) (ECons (Fun (ECons Proxy ENil) (\(ECons x ENil) -> k x)) ENil))
 
-cascadeAppS :: (App2 IFq IFqT e) => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
-cascadeAppS 0 x f = f x
-cascadeAppS n x f = share (appF x x) $ \y -> cascadeAppS (n-1) y f
 
-cascadeAppC :: (App2 IFq IFqT e) => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
-cascadeAppC 0 x f = f x
-cascadeAppC n x f = let y = appF x x in cascadeAppC (n-1) y f
-
-
-aveDupDup :: (App2 IFq IFqT e) => e (Bag Double) -> e Double
-aveDupDup x = cascadeAppS 4 x ave
-
-aveDupDup' :: (App2 IFq IFqT e) => e (Bag Double) -> e Double
-aveDupDup' x = cascadeAppC 4 x ave
 
 {-
 
@@ -1482,39 +1423,6 @@ Diff: #tenv1 = 5 and #tenv2 = 5
                   in func_amJ0 v_amIY)))
 
 -}
-
-
--- >>> let f = $$(runIFq (runAppMono' ave))
--- >>> let (res, tr) = f (Bag [1..100])
--- >>> res
--- >>> let dbs = iterations tr [Bag [1], Bag [2], Bag [30]]
--- >>> dbs
--- >>> res /+ mconcat dbs
--- 50.5
--- [Sum {getSum = -0.4900990099009874},Sum {getSum = -0.4706853038245029},Sum {getSum = -0.18970112316771548}]
--- 49.349514563106794
-
--- >>> let f = $$(runIFq (runAppMono' aveDupDup))
--- >>> let (res, tr) = f (Bag [1..100])
--- >>> res
--- >>> let dbs = iterations tr [Bag [1], Bag [2], Bag [30]]
--- >>> dbs
--- >>> res /+ mconcat dbs
--- 50.5
--- [Sum {getSum = -0.4900990099009874},Sum {getSum = -0.4706853038245029},Sum {getSum = -0.18970112316771548}]
--- 49.349514563106794
-
-
--- >>> let f = $$(runIFq (runAppMono' aveDupDup'))
--- >>> let (res, tr) = f (Bag [1..100])
--- >>> res
--- >>> let dbs = iterations tr [Bag [1], Bag [2], Bag [30]]
--- >>> dbs
--- >>> res /+ mconcat dbs
--- 50.5
--- [Sum {getSum = -0.4900990099009874},Sum {getSum = -0.4706853038245029},Sum {getSum = -0.18970112316771548}]
--- 49.349514563106794
-
 
 
 

@@ -1,14 +1,18 @@
-{-# LANGUAGE DataKinds       #-}
-{-# LANGUAGE GADTs           #-}
-{-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE PolyKinds       #-}
-{-# LANGUAGE RankNTypes      #-}
-{-# LANGUAGE TypeFamilies    #-}
-{-# LANGUAGE TypeOperators   #-}
+{-# LANGUAGE ConstraintKinds       #-}
+{-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE GADTs                 #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE PatternSynonyms       #-}
+{-# LANGUAGE PolyKinds             #-}
+{-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE TypeOperators         #-}
 
 module Data.Env where
 
-import           Data.Kind (Type)
+import           Data.Kind     (Constraint, Type)
+import           Data.Typeable (Proxy)
 
 data Env (f :: k -> Type) (as :: [k]) where
   ENil  :: Env f '[]
@@ -19,9 +23,26 @@ pattern a :> as = ECons a as
 
 infixr 5 :>
 
+type family AllIn as c :: Constraint where
+  AllIn '[] c = ()
+  AllIn (a ': as) c = (c a, AllIn as c)
+
+
+-- class AllIn (as :: [k]) (c :: k -> Constraint)  where
+--   indAs :: Proxy c -> forall p. p '[] -> (forall b bs. (c b, AllIn bs c) => p bs -> p (b ': bs)) -> p as
+
+-- instance AllIn '[] c where
+--   indAs _ p0 _ = p0
+-- instance (c a, AllIn as c) => AllIn (a ': as) c where
+--   indAs pc p0 pstep = pstep (indAs pc p0 pstep)
+
 mapEnv :: (forall a. f a -> g a) -> Env f as -> Env g as
 mapEnv _ ENil         = ENil
 mapEnv h (ECons x xs) = ECons (h x) (mapEnv h xs)
+
+zipWithEnv :: (forall a. f a -> g a -> h a) -> Env f as -> Env g as -> Env h as
+zipWithEnv _ ENil ENil                 = ENil
+zipWithEnv k (ECons x xs) (ECons y ys) = ECons (k x y) $ zipWithEnv k xs ys
 
 lenEnv :: Env f as -> Int
 lenEnv ENil        = 0
