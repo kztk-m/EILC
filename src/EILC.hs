@@ -10,6 +10,7 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE NoMonomorphismRestriction  #-}
 {-# LANGUAGE PolyKinds                  #-}
+{-# LANGUAGE QuantifiedConstraints      #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE StandaloneDeriving         #-}
@@ -23,21 +24,85 @@ module EILC where
 
 import           Data.Coerce           (coerce)
 import           Data.Functor.Identity
-import           Data.Monoid           (Sum (..))
+import           Data.Monoid           (Dual (..), Endo (..), Sum (..))
 import           Data.Typeable         (Proxy (..))
 import           Prelude               hiding (id, (.))
 import qualified Unsafe.Coerce         as Unsafe
 
 import qualified Language.Haskell.TH   as TH
 
+import           Control.Applicative   (Alternative (..))
 import           Data.Env
+import           Data.Foldable         (Foldable (fold))
+import qualified Data.Foldable
 import           Data.Function         (fix)
 import           Data.Kind             (Type)
 import           Language.Unembedding
+import qualified Text.Show
 
+
+-- We want to define a class with
+--
+--     injMonoid :: a -> m a
+--     monoidMap :: Monoid n => (a -> n) -> m a -> n
+--     m a is always a monoid
+--
+-- Then, m must be Applicative as
+--
+-- f <*> x = monoidMap f $ \f' -> monoidMap x $ \x' -> injMonoid (f' a')
+
+class (Applicative m, Alternative m, Foldable m) => MonoidF m
+
+injMonoid :: MonoidF m => a -> m a
+injMonoid = pure -- compatibility
+
+monoidMap :: (MonoidF m, Monoid n) => (a -> n) -> m a -> n
+monoidMap = foldMap
+
+monoidFromList :: MonoidF m => [a] -> m a
+monoidFromList = foldr ((<|>) . injMonoid) empty
+
+-- mmap :: (MonoidF a m, MonoidF b n) => (a -> b) -> m -> n
+-- mmap f = monoidMap (injMonoid . f)
+
+instance MonoidF []
+
+newtype FreeMonoidF a =
+    FreeMonoidF { foldFreeMonoidF :: forall n. Monoid n => (a -> n) -> n }
+
+instance Show a => Show (FreeMonoidF a) where
+  showsPrec k xs = showParen (k > 9) s
+    where
+      s = Text.Show.showString "monoidFromList" . showChar ' ' . shows (foldFreeMonoidF xs $ \x -> [x])
+
+
+instance Functor FreeMonoidF where
+  fmap f xs = FreeMonoidF $ \h -> foldFreeMonoidF xs (h . f)
+  {-# INLINE fmap #-}
+
+instance Semigroup (FreeMonoidF a) where
+  xs <> ys = FreeMonoidF $ \h -> foldFreeMonoidF xs h <> foldFreeMonoidF ys h
+
+instance Monoid (FreeMonoidF a) where
+  mempty = FreeMonoidF $ const mempty
+
+instance Applicative FreeMonoidF where
+  pure a = FreeMonoidF $ \h -> h a
+  f <*> x = foldFreeMonoidF f $ \f' -> foldFreeMonoidF x $ \x' -> pure (f' x')
+
+instance Alternative FreeMonoidF where
+  empty = mempty
+  (<|>) = (<>)
+
+instance Foldable FreeMonoidF where
+  foldMap h as = foldFreeMonoidF as h
+  {-# INLINE foldMap #-}
+
+instance MonoidF FreeMonoidF
 
 -- FIXME: use Hughes lists or something similar
-type Delta a = [AtomicDelta a]
+-- type Delta a = [AtomicDelta a]
+type Delta a = FreeMonoidF (AtomicDelta a)
 
 -- Non-injectivity is usually a source of a trouble.
 data family AtomicDelta (a :: Type) :: Type
@@ -48,13 +113,32 @@ data instance AtomicDelta (a, b) = ADFst (AtomicDelta a) | ADSnd (AtomicDelta b)
 
 deriving instance (Show (AtomicDelta a), Show (AtomicDelta b)) => Show (AtomicDelta (a, b))
 
+fstDelta :: Delta (a, b) -> Delta a
+fstDelta = foldMap fstDeltaA
+
+fstDeltaA :: AtomicDelta (a, b) -> Delta a
+fstDeltaA (ADFst da) = injMonoid da
+fstDeltaA _          = mempty
+
+sndDelta :: Delta (a, b) -> Delta b
+sndDelta = foldMap sndDeltaA
+
+sndDeltaA :: AtomicDelta (a, b) -> Delta b
+sndDeltaA (ADSnd db) = injMonoid db
+sndDeltaA _          = mempty
+
+pairDelta :: Delta a -> Delta b -> Delta (a, b)
+pairDelta xs ys = fmap ADFst xs <> fmap ADSnd ys
+
 class Diff a where
   applyAtomicDelta :: a -> AtomicDelta a -> a
 
   -- | Applying delta.
   -- prop> a /+ da /+ da' = a /+ (da <> da')
   (/+) :: a -> Delta a -> a
-  a /+ das = foldl applyAtomicDelta a das
+  a /+ das =
+    -- appEndo (getDual (monoidMap (\da -> Dual $ Endo $ \a -> applyAtomicDelta a da) das)) a
+    foldl applyAtomicDelta a das
 
 instance Diff () where
   applyAtomicDelta () _ = ()
@@ -64,8 +148,17 @@ instance (Diff a, Diff b) => Diff (a, b) where
   applyAtomicDelta (a, b) (ADFst da) = (applyAtomicDelta a da, b)
   applyAtomicDelta (a, b) (ADSnd db) = (a, applyAtomicDelta b db)
 
+-- State-Writer, both are composed left-to-right
+newtype StateWriterLL s w = StateWriterLL { unStateWriterLL :: s -> (w, s) }
 
+instance Semigroup w => Semigroup (StateWriterLL s w) where
+  f <> g = StateWriterLL $ \s ->
+    let (m1, s1) = unStateWriterLL f s
+        (m2, s2) = unStateWriterLL g s1
+    in (m1 <> m2, s2)
 
+instance Monoid w => Monoid (StateWriterLL s w) where
+  mempty = StateWriterLL $ \s -> (mempty , s)
 
 -- | Incremtalized function
 --
@@ -78,14 +171,15 @@ data IF a b = forall c. IF !(a -> (b, c)) !(AtomicDelta a -> c -> (Delta b, c))
 data IV a b = forall c. IV !(b, c) !(AtomicDelta a -> c -> (Delta b, c))
 
 iterTr :: (AtomicDelta a -> c -> (Delta b, c)) -> (Delta a -> c -> (Delta b, c))
-iterTr f [] c = ([], c)
-iterTr f (da : das) c =
-  let (db,  c1) = f da c
-      (res, c2) = iterTr f das c1
-  in (db <> res, c2)
+iterTr f = unStateWriterLL . monoidMap (StateWriterLL . f)
+-- iterTr f [] c = ([], c)
+-- iterTr f (da : das) c =
+--   let (db,  c1) = f da c
+--       (res, c2) = iterTr f das c1
+--   in (db <> res, c2)
 
 instance CategoryK IF where
-  id = IF (\a -> (a, ())) (\da c -> ([da] , c))
+  id = IF (\a -> (a, ())) (\da c -> (injMonoid da , c))
 
   IF f2 tr2 . IF f1 tr1 = IF f tr
     where
@@ -108,10 +202,10 @@ prodIF (IF f1 tr1) (IF f2 tr2) = IF f tr
     tr ds (c1 , c2) =
       let (da , c1') = tr1 ds c1
           (db , c2') = tr2 ds c2
-      in ( map ADFst da <> map ADSnd db , (c1' , c2') )
+      in ( fmap ADFst da <> fmap ADSnd db , (c1' , c2') )
 
 toIF :: Diff a => (a -> b) -> (a -> AtomicDelta a -> Delta b) -> IF a b
-toIF f df = IF (\a -> (f a, a)) (\da a -> (df a da, a /+ [da]))
+toIF f df = IF (\a -> (f a, a)) (\da a -> (df a da, applyAtomicDelta a da))
 
 -- runIF :: IF a b -> a -> (b, [Delta a] -> [Delta b])
 -- runIF (IF f tr) a =
@@ -265,7 +359,7 @@ decompConn IsNoneFalse IsNoneFalse (CNE (CJoin x y)) = (CNE x, CNE y)
 data IFt a b = forall cs. IFt (IsNone cs) (a -> (b, Conn Identity cs)) (AtomicDelta a -> Conn Identity cs -> (Delta b, Conn Identity cs))
 
 instance CategoryK IFt where
-  id = IFt IsNoneTrue (\a -> (a, CNone)) (\da c -> ([da], c))
+  id = IFt IsNoneTrue (\a -> (a, CNone)) (\da c -> (injMonoid da, c))
 
   IFt isNone2 f2 tr2 . IFt isNone1 f1 tr1 = IFt (isNoneAnd isNone1 isNone2) f tr
     where
@@ -293,7 +387,7 @@ multIFt (IFt isNone1 f1 tr1) (IFt isNone2 f2 tr2) = IFt (isNoneAnd isNone1 isNon
       let
         (da, c1') = tr1 ds c1
         (db, c2') = tr2 ds c2
-      in ( map ADFst da <> map ADSnd db, joinConn c1' c2' )
+      in ( pairDelta da db, joinConn c1' c2' )
 
 
 -- Then, we focus on the first:
@@ -418,7 +512,7 @@ multIFq (IFq sh1 f1 tr1) (IFq sh2 f2 tr2) = IFq (joinConn sh1 sh2) f tr
     tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
       (da, c1') <- tr1 ds c1
       (db, c2') <- tr2 ds c2
-      r <- mkLet [|| map ADFst $$da <> map ADSnd $$db ||]
+      r <- mkLet [|| pairDelta $$da $$db ||]
       return ( r, joinConn c1' c2' )
 
 
@@ -594,16 +688,16 @@ prepare unembedded types for each C, we will prepare one type that works for all
 
 instance Cartesian IFq where
   multS = multIFq
-  unitS = IFq CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| [] ||], CNone))
+  unitS = IFq CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| mempty ||], CNone))
 
   fstS _ _ = IFq CNone
                 (\as    -> do { v <- mkLet [|| fst $$as  ||] ; return (v, CNone)})
-                (\das _ -> do { v <- mkLet [|| [ da | ADFst da <- $$das ] ||] ; return (v, CNone) })
+                (\das _ -> do { v <- mkLet [|| fstDelta $$das ||] ; return (v, CNone) })
 --                (\das _ -> do { vda <- mkLet [|| fst $$das ||]; return (vda, CNone) } )
 
   sndS _ _ = IFq CNone
                 (\as    -> do { v <- mkLet [|| snd $$as ||] ; return (v, CNone)})
-                (\das _ -> do { v <- mkLet [|| [ da | ADSnd da <- $$das ] ||] ; return (v, CNone) })
+                (\das _ -> do { v <- mkLet [|| sndDelta $$das ||] ; return (v, CNone) })
 --                (\das _ -> do { vda <- mkLet [|| snd $$das ||]; return (vda, CNone) } )
 
 -- instance AppS IFq where
@@ -806,10 +900,10 @@ instance Term IFq IFqT where
       tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
         (da, c1') <- tr1 ds c1
         (db, c2') <- tr2 ds c2
-        r <- mkLet [|| map ADFst $$da <> map ADSnd $$db ||]
+        r <- mkLet [|| pairDelta $$da $$db ||]
         return ( r, joinConn c1' c2' )
 
-  unitTerm tenv = IFqT tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| [] ||], CNone))
+  unitTerm tenv = IFqT tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| mempty ||], CNone))
 
   var0Term tenv = IFqT (ECons Proxy tenv)
                        CNone
@@ -954,44 +1048,62 @@ data IFqA a b where
     -> (Code (AtomicDelta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
     -> IFqA a b
 
+-- Just to surpress type errors.
+foldrDelta :: (AtomicDelta a -> b -> b) -> b -> Delta a -> b
+foldrDelta = foldr
+{-# INLINE foldrDelta #-}
+
 iterTrC ::
   forall cs a b.
   Conn Proxy cs
   -> (Code (AtomicDelta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
   -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
 iterTrC proxy h das0 cs0 = CodeC $ \(k :: (Code (Delta b), Conn PackedCode cs) -> Code r) ->
-   [|| let
-        -- iter :: Func cs (Delta b -> Delta a -> (Func cs (Delta b -> r)) -> r)
-        iter acc das =
-          $$(mkAbs proxy $ \cs ->
-                    [|| case das of
-                            []        -> $$(k ([|| acc ||], cs))
-                            da : rest ->
-                                $$(runCodeC (h [|| da ||] cs) $ \(dbs1 :: Code (Delta b), cs') ->
-                                      [|| $$(mkApp [|| iter (acc <> $$dbs1) rest ||] cs') ||])
-                     ||] )
-      in $$(mkApp [|| iter mempty $$das0 ||] cs0)
---           $$(mkAbs proxy $ \cs -> [|| \acc -> $$(k ([|| acc ||], cs)) ||])
+  [||
+    -- f :: AtomicDelta a -> (Delta b -> Func cs r) -> Delta b -> Func cs r
+    let f da cont = \acc -> $$(mkAbs proxy $ \cs ->
+                runCodeC (h [|| da ||] cs) $ \(dbs1, cs') ->
+                  mkApp @cs @r [|| cont (acc <> $$dbs1) ||] cs')
+    in $$(mkApp [|| foldrDelta f (\acc -> $$(mkAbs proxy $ \cs -> k ([|| acc ||], cs))) $$das0  mempty ||] cs0)
    ||]
+  -- [||
+  --     let f da = Endo $ \cont acc -> $$(mkAbs proxy $ \cs ->
+  --           runCodeC (h [|| da ||] cs) $ \(dbs1, cs') ->
+  --             mkApp @cs @r [|| cont ($$dbs1 <> acc) ||] cs')
+  --     in $$(mkApp [|| appEndo (monoidMap f $$das0) (\acc -> $$(mkAbs proxy $ \cs -> k ([|| acc ||], cs))) mempty  ||] cs0)
+  --  ||]
+--    [|| let
+--         -- iter :: Func cs (Delta b -> Delta a -> (Func cs (Delta b -> r)) -> r)
+--         iter acc das =
+--           $$(mkAbs proxy $ \cs ->
+--                     [|| case das of
+--                             []        -> $$(k ([|| acc ||], cs))
+--                             da : rest ->
+--                                 $$(runCodeC (h [|| da ||] cs) $ \(dbs1 :: Code (Delta b), cs') ->
+--                                       [|| $$(mkApp [|| iter (acc <> $$dbs1) rest ||] cs') ||])
+--                      ||] )
+--       in $$(mkApp [|| iter mempty $$das0 ||] cs0)
+-- --           $$(mkAbs proxy $ \cs -> [|| \acc -> $$(k ([|| acc ||], cs)) ||])
+--    ||]
 
 
 ifqAFromStateless :: (Code a -> Code b) -> (Code (Delta a) -> Code (Delta b)) -> IFqA a b
 ifqAFromStateless f df =
-  IFqA CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df [|| [ $$da ] ||]) ; return (v, CNone) })
+  IFqA CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df [|| injMonoid $$da ||]) ; return (v, CNone) })
 
 ifqAFromD :: Diff a => (Code a -> Code b) -> (Code a -> Code (Delta a) -> Code (Delta b)) -> IFqA a b
 ifqAFromD f df =
   IFqA
     (CNE (COne Proxy))
     (\a -> do { v <- mkLet (f a) ; return (v, CNE (COne (PackedCode a))) })
-    (\da (CNE (COne (PackedCode a))) -> do { v <- mkLet (df a [|| [ $$da ] ||]) ; a' <- mkLet [|| applyAtomicDelta $$a $$da ||] ; return (v, CNE (COne (PackedCode a'))) })
+    (\da (CNE (COne (PackedCode a))) -> do { v <- mkLet (df a [|| injMonoid $$da ||]) ; a' <- mkLet [|| applyAtomicDelta $$a $$da ||] ; return (v, CNE (COne (PackedCode a'))) })
 
 ifqAFromFunctions :: Code (a -> (b, c)) -> Code (Delta a -> c -> (Delta b, c)) -> IFqA a b
 ifqAFromFunctions f df =
   IFqA (CNE (COne Proxy))
        (\a -> CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))) ) ||])
        (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
-        [|| let (db, c') = $$df [$$da] $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
+        [|| let (db, c') = $$df (injMonoid $$da) $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
 
 ifqAFromStatelessA :: (Code a -> Code b) -> (Code (AtomicDelta a) -> Code (Delta b)) -> IFqA a b
 ifqAFromStatelessA f df =
@@ -1014,7 +1126,7 @@ ifqAFromFunctionsA f df =
 
 instance CategoryK IFqA where
   type K IFqA = Diff
-  id = IFqA CNone (\a -> return (a, CNone)) (\da _ -> return ([|| [ $$da ] ||], CNone))
+  id = IFqA CNone (\a -> return (a, CNone)) (\da _ -> return ([|| injMonoid $$da ||], CNone))
   IFqA sh2 f2 tr2 . IFqA sh1 f1 tr1 = IFqA (joinConn sh1 sh2) f tr
     where
       f a = do
@@ -1087,24 +1199,24 @@ instance Term IFqA IFqAT where
       tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
         (da, c1') <- tr1 ds c1
         (db, c2') <- tr2 ds c2
-        r <- mkLet [|| map ADFst $$da <> map ADSnd $$db ||]
+        r <- mkLet [|| pairDelta $$da $$db ||]
         return ( r, joinConn c1' c2' )
 
-  unitTerm tenv = IFqAT tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| [] ||], CNone))
+  unitTerm tenv = IFqAT tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| mempty ||], CNone))
 
   var0Term tenv = IFqAT (ECons Proxy tenv)
                         CNone
                         (\(ECons (PackedCode a) _) -> return (a, CNone))
                         (\denv _ -> case denv of
-                            IndexZ (PackedCodeAtomicDelta da) -> return ([|| [ $$da ] ||], CNone)
-                            _         -> return ([|| [] ||], CNone))
+                            IndexZ (PackedCodeAtomicDelta da) -> return ([|| injMonoid $$da ||], CNone)
+                            _         -> return ([|| mempty ||], CNone))
 --                         (\(ECons (PackedCodeDelta da) _) _ -> return (da, CNone))
 
   weakenTerm (IFqAT tenv i f tr) = IFqAT (ECons Proxy tenv) i f' tr'
     where
       f'  (ECons _ s) = f s
       tr' (IndexS ix) = tr ix
-      tr' _           = \cs -> return ([|| [] ||],  cs)
+      tr' _           = \cs -> return ([|| mempty ||],  cs)
 
   unliftTerm (IFqAT _ i f tr) = IFqA i f' tr'
     where

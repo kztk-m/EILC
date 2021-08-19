@@ -31,6 +31,8 @@ import           Data.Sequence         (Seq)
 import           Data.Typeable         (Proxy (Proxy))
 import           Debug.Trace           (trace)
 
+import           Data.Monoid
+
 newtype S a = S { unS :: Seq.Seq a }
   deriving Show
 
@@ -47,7 +49,7 @@ type DeltaS a = AtomicDelta (S a)
 
 
 instance Diff a => Diff (S a) where
-    applyAtomicDelta (S s0) ds = S (ad s0 ds)
+    applyAtomicDelta (S seq0) ds = S (ad seq0 ds)
       where
         ad :: Seq.Seq a -> DeltaS a -> Seq.Seq a
         ad s0 (SIns n (S s)) = insSeq n s s0
@@ -84,7 +86,7 @@ rearrSeq i n j s0 =
 
 -- APIs
 dsingleton :: AtomicDelta a -> Delta (S a)
-dsingleton da = [coerce $ SRep 0 da]
+dsingleton da = injMonoid $ coerce $ SRep 0 da
 
 singletonF :: (App2 IFqA IFqAT e, Diff a) => e a -> e (S a)
 singletonF = lift singletonC
@@ -94,7 +96,7 @@ singletonF = lift singletonC
                          (\da -> [|| dsingleton $$da ||])
 
 dempty :: Delta (S a)
-dempty = []
+dempty = mempty
 
 emptyF :: (App2 IFqA IFqAT e, Diff a) => e (S a)
 emptyF = lift emptyC unit
@@ -128,13 +130,13 @@ trConcatCAtomic :: DeltaS (S a) -> ConcatC -> (Delta (S a), ConcatC)
 trConcatCAtomic (SIns i s') c =
   -- in this case, a sequence s' is inserted at ith element
   let toI = sum (Seq.take i c)
-  in ([SIns toI (concatSeq s')], insAtC i (s2c s') c)
+  in (injMonoid (SIns toI (concatSeq s')), insAtC i (s2c s') c)
 trConcatCAtomic (SDel i n) c =
   let (c1, c23) = Seq.splitAt i c
       (c2, c3)  = Seq.splitAt n c23
       toI       = sum c1
       toN       = sum c2
-  in ([SDel toI toN], c1 Seq.>< c3)
+  in (injMonoid (SDel toI toN), c1 Seq.>< c3)
 trConcatCAtomic (SRearr i n j) c =
   let (c1, c23) = Seq.splitAt i c
       (c2, c3)  = Seq.splitAt n c23
@@ -142,7 +144,7 @@ trConcatCAtomic (SRearr i n j) c =
       toN       = sum c2
       c13       = c1 Seq.>< c3
       toJ       = sum $ Seq.take j c13
-  in ([SRearr toI toN toJ], insAtC j c2 c13 )
+  in (injMonoid (SRearr toI toN toJ), insAtC j c2 c13 )
 trConcatCAtomic (SRep i ds) c =
   let ci = fromJust $ Seq.lookup i c
       offset = sum $ Seq.take i c
@@ -156,17 +158,17 @@ trConcatCAtomic (SRep i ds) c =
     --       (ds2, ci2) = go offset xs ci1
     --   in (ds1 <> ds2, ci2)
 
-    goAtomic :: Int -> DeltaS a -> Int -> ([DeltaS a], Int)
+    goAtomic :: Int -> DeltaS a -> Int -> (Delta (S a), Int)
     goAtomic offset (SIns j as) ci =
-      ([SIns (offset + j) as], ci + Seq.length (unS as))
+      (injMonoid (SIns (offset + j) as), ci + Seq.length (unS as))
     goAtomic offset (SDel j n) ci =
       let -- adjust n to satisfy the invaliant n + j <= ci
           n' = n + (if j + n > ci then ci - (j + n) else 0)
-      in ([SDel (offset + j) n'], ci - n')
+      in (injMonoid (SDel (offset + j) n'), ci - n')
     goAtomic offset (SRep j da) ci =
-      ([SRep (offset + j) da], ci)
+      (injMonoid (SRep (offset + j) da), ci)
     goAtomic offset (SRearr j n k) ci =
-      ([SRearr (offset + j) n (offset + k)], ci)
+      (injMonoid (SRearr (offset + j) n (offset + k)), ci)
 
 concatF :: (App2 IFqA IFqAT e, Diff a) => e (S (S a)) -> e (S a)
 concatF = lift $ ifqAFromFunctionsA [|| concatC ||] [|| trConcatCAtomic ||]
@@ -256,7 +258,7 @@ infixr 5 @+
 
 sequenceDelta :: Seq (Delta a) -> Delta (S a)
 sequenceDelta s =
-  concat $ zipWith (\i -> map (SRep i)) [0..] (Data.Foldable.toList s)
+  mconcat $ zipWith (\i -> fmap (SRep i)) [0..] (Data.Foldable.toList s)
 
 mapTrUnchanged ::
   (c -> (Delta b, c))
@@ -271,17 +273,17 @@ mapTrChanged ::
   -> AtomicDelta (S a) -> Seq c -> (Delta (S b), Seq c)
 mapTrChanged f _adf (SIns i (S as)) cs     =
   let (bs, cs') = Seq.unzip $ fmap f as
-  in ([SIns i (S bs)], insSeq i cs' cs)
+  in (injMonoid (SIns i (S bs)), insSeq i cs' cs)
 mapTrChanged _ _adf (SDel i n) cs     =
   let cs' = delSeq i n cs
-  in ([SDel i n], cs')
+  in (injMonoid (SDel i n), cs')
 mapTrChanged _ adf (SRep i da) cs    =
   let ci = Seq.index cs i
       (db, ci') = adf da ci
-  in (map (SRep i) db, Seq.update i ci' cs)
+  in (fmap (SRep i) db, Seq.update i ci' cs)
 mapTrChanged _ _adf (SRearr i n j) cs =
   let cs' = rearrSeq i n j cs
-  in ([SRearr i n j], cs')
+  in (injMonoid (SRearr i n j), cs')
 -- mapTr ::
 --   (a -> (b, c))
 --   -> (c -> (Delta b, c))            -- unchanged part
@@ -406,10 +408,10 @@ mapF :: forall e a b. (App2 IFqA IFqAT e, Diff a) => (e a -> e b) -> e (S a) -> 
 mapF = flip (liftSO2 (Proxy @'[ '[], '[a] ]) mapT)
 
 fstF :: (App2 IFqA IFqAT e, Diff a, Diff b) => e (a, b) -> e a
-fstF = lift $ ifqAFromStatelessA (\a -> [|| fst $$a ||]) (\dz -> [|| case $$dz of { ADFst da -> [da] ; _ -> mempty } ||])
+fstF = lift $ ifqAFromStatelessA (\a -> [|| fst $$a ||]) (\dz -> [|| fstDeltaA $$dz||])
 
 sndF :: (App2 IFqA IFqAT e, Diff a, Diff b) => e (a, b) -> e b
-sndF = lift $ ifqAFromStatelessA (\a -> [|| snd $$a ||]) (\dz -> [|| case $$dz of { ADSnd db -> [db] ; _ -> mempty } ||])
+sndF = lift $ ifqAFromStatelessA (\a -> [|| snd $$a ||]) (\dz -> [|| sndDeltaA $$dz ||])
 
 
 
@@ -433,19 +435,22 @@ testCode ::
 testCode = runIFqA $ runMono $ \xs -> cartesian (fstF xs) (sndF xs)
 
 
+
+
+
 -- >>> let f = $$( testCode )
 -- >>> let (res, tr) = f (S $ Seq.fromList [1,2,3], S $ Seq.fromList [10, 20, 30])
 -- >>> res
--- >>> let (dr1, tr1) = runInteraction tr [ADFst $ SIns 3 (S $ Seq.fromList [4])]
+-- >>> let (dr1, tr1) = runInteraction tr $ monoidFromList [ADFst $ SIns 3 (S $ Seq.fromList [4])]
 -- >>> dr1
--- >>> let (dr2, tr2) = runInteraction tr [ADFst $ SDel 0 1]
+-- >>> let (dr2, tr2) = runInteraction tr $ monoidFromList [ADFst $ SDel 0 1]
 -- >>> dr2
--- >>> let (dr3, tr3) = runInteraction tr [ADSnd $ SIns 3 (S $ Seq.fromList [40])]
+-- >>> let (dr3, tr3) = runInteraction tr $ monoidFromList [ADSnd $ SIns 3 (S $ Seq.fromList [40])]
 -- >>> dr3
--- >>> let (dr4, tr4) = runInteraction tr [ADSnd $ SDel 0 1]
+-- >>> let (dr4, tr4) = runInteraction tr $ monoidFromList [ADSnd $ SDel 0 1]
 -- >>> dr4
 -- S {unS = fromList [(1,10),(1,20),(1,30),(2,10),(2,20),(2,30),(3,10),(3,20),(3,30)]}
--- [SIns 9 (S {unS = fromList [(4,10),(4,20),(4,30)]})]
--- [SDel 0 3]
--- [SIns 3 (S {unS = fromList [(1,40)]}),SIns 7 (S {unS = fromList [(2,40)]}),SIns 11 (S {unS = fromList [(3,40)]})]
--- [SDel 0 1,SDel 2 1,SDel 4 1]
+-- monoidFromList [SIns 9 (S {unS = fromList [(4,10),(4,20),(4,30)]})]
+-- monoidFromList [SDel 0 3]
+-- monoidFromList [SIns 3 (S {unS = fromList [(1,40)]}),SIns 7 (S {unS = fromList [(2,40)]}),SIns 11 (S {unS = fromList [(3,40)]})]
+-- monoidFromList [SDel 0 1,SDel 2 1,SDel 4 1]

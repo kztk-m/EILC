@@ -50,7 +50,7 @@ instance Diff Double where
 
 appC :: IFq (Bag Double, Bag Double) (Bag Double)
 appC = ifqFromStateless (\z -> [|| case $$z of { (Bag xs, Bag ys) -> Bag (xs ++ ys) } ||])
-                        (\dz -> [|| [ dx | ADFst dx <- $$dz ] <> [ dy | ADFst dy <- $$dz ] ||])
+                        (\dz -> [|| fstDelta $$dz <> sndDelta $$dz ||])
 --                        (\dz -> [|| case $$dz of { (Bag dx, Bag dy) -> Bag (dx ++ dy) } ||])
 appF :: App IFq e => e (Bag Double) -> e (Bag Double) -> e (Bag Double)
 appF x y = lift appC (pair x y)
@@ -76,21 +76,21 @@ ave = \x -> mysum x `mydiv` i2d (len x)
   where
     lenC :: IFq (Bag Double) Int
     lenC = ifqFromStateless (\a  -> [|| case $$a of { Bag as -> length as } ||])
-                            (\da -> [|| map (\x -> case x of { ADBag (Bag as) -> ADInt (Sum (length as)) }) $$da ||])
+                            (\da -> [|| fmap (\x -> case x of { ADBag (Bag as) -> ADInt (Sum (length as)) }) $$da ||])
 
     i2dC :: IFq Int Double
     i2dC = ifqFromStateless (\a  -> [|| fromIntegral $$a :: Double ||])
-                            (\da -> [|| map (\(ADInt x) -> ADDouble (Sum $ fromIntegral $ getSum x)) $$da ||])
+                            (\da -> [|| fmap (\(ADInt x) -> ADDouble (Sum $ fromIntegral $ getSum x)) $$da ||])
     -- (\da -> [|| Sum (fromIntegral (getSum $$da) :: Double) ||])
 
     sumC :: IFq (Bag Double) Double
     sumC = ifqFromStateless (\a  -> [|| case $$a of { Bag as -> sum as } ||])
-                            (\da -> [|| map (\ (ADBag (Bag as)) -> ADDouble (Sum (sum as)) ) $$da ||])
+                            (\da -> [|| fmap (\ (ADBag (Bag as)) -> ADDouble (Sum (sum as)) ) $$da ||])
 --                            (\da -> [|| case $$da of { Bag as' -> Sum (sum as') } ||])
 
     divC :: IFq (Double, Double) Double
     divC = ifqFromD (\z -> [|| uncurry (/) $$z ||])
-                    (\z dz -> [|| let {(x, y) = $$z; dx = [ d | ADFst d <- $$dz ] ; dy = [ d | ADSnd d <- $$dz ] } in [ADDouble $ Sum $ (x /+ dx) / (y /+ dy) - x / y] ||])
+                    (\z dz -> [|| let {(x, y) = $$z; dx = fstDelta $$dz ; dy = sndDelta $$dz } in injMonoid (ADDouble $ Sum $ (x /+ dx) / (y /+ dy) - x / y) ||])
 --                    (\z dz -> [|| let {(x, y) = $$z ; (dx, dy) = $$dz} in Sum $ (x /+ dx) / (y /+ dy) - x / y ||])
 
     len = lift lenC
