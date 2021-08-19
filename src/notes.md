@@ -68,6 +68,47 @@ Also, we can handle 2nd order APIs, which would be useful for the uses cases dis
 Having this function is possible; to do so we will take Γ × C1 × Sequence C2. 
 Γ is required as we need to run a function of type `A -> B × C2`. We collect the produced C2 to make `Sequence C2`. 
 
+~~**Note on Aug 18, 2021** I realized that the story is not that simple. Consider the case where we obtain the identity change for `Δ(Sequence A)` part, whereas `ΔΓ` is not the identity change---this actually can happen for the `cartesianProd as bs` above when the change to `as` is the identity update.~~ 
+
+~~So, we need to run the function `(ΔΓ × ΔA × C2 -> ΔB × C2)` with identity changes on `A` for unchanged parts in a list. To do so, we also need to keep the `Sequence A` part in addition. So, `C` must be `Γ × Sequence (A × C2) × C1`.~~
+
+**Note on Aug 19, 2021** 
+Considering the situation that we use the derivative to propagate a part of an update, we need to make sure that we do not duplicate updates unnecessarily. 
+
+A careful treatment is needed for products: `Δ(A × B) ~ ΔA × ΔB`. Consider consecutive updates on `da₁ + da₂` and `db₁ + db₂` on `A` and `B`, respectively. Then, we have `(da₁ + da₂, db₁ + db₂) ~ (da₁, db₁) + (da₂, db₂)`, which might look unsurprising. However, things become difficult when we want to break down an update `da` into atomic ones `da₁ + da₂ + ... + daₙ`, process each `daᵢ` individually, and compose the results to obtain the result for `da`. Then, the treatment of products becomes an issue as it disallows us to process each component separately. For example, if we happen to know `da = da₁ + da₂ + ... + daₙ`, we can decompose the update `(da, db)` into either of 
+- `(da₁, db) + (da₂, 0) + ... + (daₙ, 0)` 
+- `(da₁, 0) + (da₂, db) + ... + (daₙ, 0) `
+- ...
+- `(da₁, 0) + (da₂, 0) + ... + (daₙ, db) `
+(Here `0` denotes the identity update.) 
+
+The issue would be easy to overlook, when we treat `ΔΓ`. When we implement a function of type `ΔΓ × ΔA × C -> ΔB × C`, we are tempted to consider breaking down an update as `da = da₁ + da₂ + ... + daₙ`. But, it is easy to forget `dγ :: ΔΓ` is processed only once. However, what makes things more confusing is that copying `dγ` itself is valid if the corresponding function `Γ × A -> B` uses `Γ` multiple times. 
+
+Thus, my opinion is that we need to focus on atomic updates `Δ₁A` instead of updates `ΔA`, which we can think is a monoid generated from `Δ₁A`. The monoid `ΔA` must have the following methods
+```
+lift : Δ₁A -> ΔA
+mempty : ΔA 
+(<>) : ΔA -> ΔA -> ΔA
+hmap : Monoid m => (Δ₁A -> m) -> ΔA -> m  -- monoid homomorphism
+```
+An easiest solution is to use lists as `ΔA = [Δ₁A]`. Then, we can think a incremetalized morphism as:
+```
+IF a b = ∃c. (a -> (b, c)) × (Δ₁a -> c -> (Δb × c))
+```
+Notice that we have `Δ₁(A × B)` is equal to `Δ₁A + Δ₁B`, not `Δ₁A × Δ₁B`. Notice also that `c -> (m, c)` is a monoid if `m` is: 
+
+```
+mempty = \c -> (mempty, c) 
+f <> g = \c -> 
+  let (m1, c1) = f c 
+      (m2, c2) = g c1
+  in (m1 <> m2, c2) 
+```
+
+Thus, we can use `hmap` to convert `(Δ₁a -> c -> (Δb × c))` into `(Δa -> c -> (Δb × c))` so that we can define a composition. 
+
+**Note on Aug 19** The new implementation works but the quality of the generated code is proof due to composion. 
+
 
 ## General I/F 
 

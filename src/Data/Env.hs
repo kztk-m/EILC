@@ -40,6 +40,12 @@ mapEnv :: (forall a. f a -> g a) -> Env f as -> Env g as
 mapEnv _ ENil         = ENil
 mapEnv h (ECons x xs) = ECons (h x) (mapEnv h xs)
 
+mapEnvA :: Applicative k => (forall a. f a -> k (g a)) -> Env f as -> k (Env g as)
+mapEnvA _ ENil         = pure ENil
+mapEnvA h (ECons x xs) = ECons <$> h x <*> mapEnvA h xs
+
+
+
 zipWithEnv :: (forall a. f a -> g a -> h a) -> Env f as -> Env g as -> Env h as
 zipWithEnv _ ENil ENil                 = ENil
 zipWithEnv k (ECons x xs) (ECons y ys) = ECons (k x y) $ zipWithEnv k xs ys

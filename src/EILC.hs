@@ -12,6 +12,7 @@
 {-# LANGUAGE PolyKinds                  #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeFamilies               #-}
@@ -30,26 +31,38 @@ import qualified Unsafe.Coerce         as Unsafe
 import qualified Language.Haskell.TH   as TH
 
 import           Data.Env
+import           Data.Function         (fix)
 import           Data.Kind             (Type)
 import           Language.Unembedding
 
-type family Delta (a :: Type) :: Type
 
-type instance Delta (Identity a) = Delta a
-type instance Delta () = ()
-type instance Delta (a, b) = (Delta a, Delta b)
+-- FIXME: use Hughes lists or something similar
+type Delta a = [AtomicDelta a]
 
+-- Non-injectivity is usually a source of a trouble.
+data family AtomicDelta (a :: Type) :: Type
 
-class Monoid (Delta a) => Diff a where
+newtype instance AtomicDelta (Identity a) = DIdentity a
+data instance AtomicDelta ()
+data instance AtomicDelta (a, b) = ADFst (AtomicDelta a) | ADSnd (AtomicDelta b)
+
+deriving instance (Show (AtomicDelta a), Show (AtomicDelta b)) => Show (AtomicDelta (a, b))
+
+class Diff a where
+  applyAtomicDelta :: a -> AtomicDelta a -> a
+
   -- | Applying delta.
   -- prop> a /+ da /+ da' = a /+ (da <> da')
   (/+) :: a -> Delta a -> a
+  a /+ das = foldl applyAtomicDelta a das
 
 instance Diff () where
-  _ /+ _ = ()
+  applyAtomicDelta () _ = ()
 
 instance (Diff a, Diff b) => Diff (a, b) where
-  (a, b) /+ (da, db) = (a /+ da, b /+ db)
+  -- (a, b) /+ (da, db) = (a /+ da, b /+ db)
+  applyAtomicDelta (a, b) (ADFst da) = (applyAtomicDelta a da, b)
+  applyAtomicDelta (a, b) (ADSnd db) = (a, applyAtomicDelta b db)
 
 
 
@@ -59,13 +72,20 @@ instance (Diff a, Diff b) => Diff (a, b) where
 -- prop> let (b, tr) = runIF f a in f (foldl (/+) a das) == foldl (/+) b (tr das)
 -- Or, equivalently
 -- prop> let (b, tr) = runIF f a in f (a /+ mconcat das) == b /+ mconcat das
-data IF a b = forall c. IF !(a -> (b, c)) !(Delta a -> c -> (Delta b, c))
+data IF a b = forall c. IF !(a -> (b, c)) !(AtomicDelta a -> c -> (Delta b, c))
 
 -- simplarly to IF but a is applied partially beforehand
-data IV a b = forall c. IV !(b, c) !(Delta a -> c -> (Delta b, c))
+data IV a b = forall c. IV !(b, c) !(AtomicDelta a -> c -> (Delta b, c))
+
+iterTr :: (AtomicDelta a -> c -> (Delta b, c)) -> (Delta a -> c -> (Delta b, c))
+iterTr f [] c = ([], c)
+iterTr f (da : das) c =
+  let (db,  c1) = f da c
+      (res, c2) = iterTr f das c1
+  in (db <> res, c2)
 
 instance CategoryK IF where
-  id = IF (\a -> (a, ())) (\da c -> (da , c))
+  id = IF (\a -> (a, ())) (\da c -> ([da] , c))
 
   IF f2 tr2 . IF f1 tr1 = IF f tr
     where
@@ -74,8 +94,8 @@ instance CategoryK IF where
             in (c, (c1, c2))
 
       tr da (c1 , c2) =
-        let (db , c1') = tr1 da c1
-            (dc , c2') = tr2 db c2
+        let (dbs , c1') = tr1 da c1
+            (dc , c2')  = iterTr tr2 dbs c2
         in (dc , (c1' , c2'))
 
 prodIF :: IF s a -> IF s b -> IF s (a, b)
@@ -88,20 +108,20 @@ prodIF (IF f1 tr1) (IF f2 tr2) = IF f tr
     tr ds (c1 , c2) =
       let (da , c1') = tr1 ds c1
           (db , c2') = tr2 ds c2
-      in ( (da, db) , (c1' , c2') )
+      in ( map ADFst da <> map ADSnd db , (c1' , c2') )
 
-toIF :: Diff a => (a -> b) -> (a -> Delta a -> Delta b) -> IF a b
-toIF f df = IF (\a -> (f a, a)) (\da a -> (df a da, a /+ da))
+toIF :: Diff a => (a -> b) -> (a -> AtomicDelta a -> Delta b) -> IF a b
+toIF f df = IF (\a -> (f a, a)) (\da a -> (df a da, a /+ [da]))
 
-runIF :: IF a b -> a -> (b, [Delta a] -> [Delta b])
-runIF (IF f tr) a =
-  let (b, c) = f a
-  in (b, comp c)
-  where
-    comp _ [] = []
-    comp c (da : das) =
-      let (db, c') = tr da c
-      in db : comp c' das
+-- runIF :: IF a b -> a -> (b, [Delta a] -> [Delta b])
+-- runIF (IF f tr) a =
+--   let (b, c) = f a
+--   in (b, comp c)
+--   where
+--     comp _ [] = []
+--     comp c (da : das) =
+--       let (db, c') = tr da c
+--       in db : comp c' das
 
 class Incr e where
   liftI :: Diff a => (a -> b) -> (a -> Delta a -> Delta b) -> e a -> e b
@@ -109,55 +129,62 @@ class Incr e where
 
   pairI :: e a -> e b -> e (a, b)
 
+data Index f as where
+  IndexZ :: f a -> Index f (a ': as)
+  IndexS :: Index f as -> Index f (b ': as)
 
 data DEnv f as where
   DENil :: DEnv f '[]
   DECons :: Delta (f a) -> DEnv f as -> DEnv f (a ': as)
 
-newtype PackedDelta f a = PackedDelta { getDelta :: Delta (f a) }
+-- newtype PackedDelta f a = PackedDelta { getDelta :: Delta (f a) }
 
-type instance Delta (Env f as) = Env (PackedDelta f) as
+newtype PackedAtomicDelta f a = PackedAtomicDelta { getAtomicDelta :: AtomicDelta (f a) }
 
-tailIF :: IF (Env Identity (a : as)) (Env Identity as)
-tailIF = IF (\(ECons _ r) -> (r, ()))
-            (\(ECons _ dr) _ -> (dr, ()))
-
-headIF :: IF (Env Identity (a : as)) a
-headIF = IF (\(ECons a _) -> (coerce a, ()))
-            (\(ECons da _) _ -> (coerce da, ()))
+-- type instance Delta (Env f as) = Env (PackedDelta f) as
+newtype instance AtomicDelta (Env f as) = AtomicDeltaEnv (Index (PackedAtomicDelta f) as)
 
 
-newtype UnembIncr b = UnembIncr { runUnembIncr :: forall as. Env Proxy as -> IF (Env Identity as) b  }
+-- tailIF :: IF (Env Identity (a : as)) (Env Identity as)
+-- tailIF = IF (\(ECons _ r) -> (r, ()))
+--             (\(ECons _ dr) _ -> (dr, ()))
 
-instance Incr UnembIncr where
-  liftI f df (UnembIncr x) = UnembIncr (\tenv -> toIF f df . x tenv)
-
-  shareI (UnembIncr e0) k = UnembIncr $ \tenv ->
-    let tenv1 = ECons Proxy tenv
-        arg   = UnembIncr $ \tenv' -> diff tenv1 tenv' headIF
-    in runUnembIncr (k arg) tenv1. toEnv . prodIF (e0 tenv) id
-    where
-      diff :: Env Proxy as -> Env Proxy bs -> IF (Env Identity as) a -> IF (Env Identity bs) a
-      diff tenv1 tenv2 = diff' (lenEnv tenv2 - lenEnv tenv1) tenv1 tenv2
-        where
-          diff' :: Int -> Env Proxy xs -> Env Proxy ys -> IF (Env Identity xs) a -> IF (Env Identity ys) a
-          diff' 0 _ _ x             = Unsafe.unsafeCoerce x
-          diff' n γ1 (ECons _ γ2) x = diff' (n-1) γ1 γ2 x . tailIF
-          diff' _ _ _ _             = error "Unreachable"
+-- headIF :: IF (Env Identity (a : as)) a
+-- headIF = IF (\(ECons a _) -> (coerce a, ()))
+--             (\(ECons da _) _ -> (coerce da, ()))
 
 
-      toEnv :: IF (a, Env Identity as) (Env Identity (a ': as))
-      toEnv = IF (\(a, as) -> (ECons (Identity a) as, ()))
-                 (\(da, das) _ -> (ECons (PackedDelta da) das, ()))
+-- newtype UnembIncr b = UnembIncr { runUnembIncr :: forall as. Env Proxy as -> IF (Env Identity as) b  }
 
-  pairI (UnembIncr x) (UnembIncr y) = UnembIncr $ \tenv -> prodIF (x tenv) (y tenv)
+-- instance Incr UnembIncr where
+--   liftI f df (UnembIncr x) = UnembIncr (\tenv -> toIF f df . x tenv)
 
-runIncrMono :: (UnembIncr a -> UnembIncr b) -> IF a b
-runIncrMono f = runUnembIncr (shareI (UnembIncr $ \(ECons Proxy _) -> Unsafe.unsafeCoerce headIF) f) (ECons Proxy ENil) . singleton
-  where
-    singleton :: IF a (Env Identity '[a])
-    singleton = IF (\a -> (ECons (Identity a) ENil, ()))
-                   (\da _ -> (ECons (PackedDelta da) ENil, ()))
+--   shareI (UnembIncr e0) k = UnembIncr $ \tenv ->
+--     let tenv1 = ECons Proxy tenv
+--         arg   = UnembIncr $ \tenv' -> diff tenv1 tenv' headIF
+--     in runUnembIncr (k arg) tenv1. toEnv . prodIF (e0 tenv) id
+--     where
+--       diff :: Env Proxy as -> Env Proxy bs -> IF (Env Identity as) a -> IF (Env Identity bs) a
+--       diff tenv1 tenv2 = diff' (lenEnv tenv2 - lenEnv tenv1) tenv1 tenv2
+--         where
+--           diff' :: Int -> Env Proxy xs -> Env Proxy ys -> IF (Env Identity xs) a -> IF (Env Identity ys) a
+--           diff' 0 _ _ x             = Unsafe.unsafeCoerce x
+--           diff' n γ1 (ECons _ γ2) x = diff' (n-1) γ1 γ2 x . tailIF
+--           diff' _ _ _ _             = error "Unreachable"
+
+
+--       toEnv :: IF (a, Env Identity as) (Env Identity (a ': as))
+--       toEnv = IF (\(a, as) -> (ECons (Identity a) as, ()))
+--                  (\(da, das) _ -> (ECons (PackedDelta da) das, ()))
+
+--   pairI (UnembIncr x) (UnembIncr y) = UnembIncr $ \tenv -> prodIF (x tenv) (y tenv)
+
+-- runIncrMono :: (UnembIncr a -> UnembIncr b) -> IF a b
+-- runIncrMono f = runUnembIncr (shareI (UnembIncr $ \(ECons Proxy _) -> Unsafe.unsafeCoerce headIF) f) (ECons Proxy ENil) . singleton
+--   where
+--     singleton :: IF a (Env Identity '[a])
+--     singleton = IF (\a -> (ECons (Identity a) ENil, ()))
+--                    (\da _ -> (ECons (PackedDelta da) ENil, ()))
 
 
 
@@ -235,10 +262,10 @@ decompConn IsNoneTrue  _            c                = (CNone, c)
 decompConn IsNoneFalse IsNoneTrue  (CNE x)           = (CNE x, CNone)
 decompConn IsNoneFalse IsNoneFalse (CNE (CJoin x y)) = (CNE x, CNE y)
 
-data IFt a b = forall cs. IFt (IsNone cs) (a -> (b, Conn Identity cs)) (Delta a -> Conn Identity cs -> (Delta b, Conn Identity cs))
+data IFt a b = forall cs. IFt (IsNone cs) (a -> (b, Conn Identity cs)) (AtomicDelta a -> Conn Identity cs -> (Delta b, Conn Identity cs))
 
 instance CategoryK IFt where
-  id = IFt IsNoneTrue (\a -> (a, CNone)) (\da c -> (da, c))
+  id = IFt IsNoneTrue (\a -> (a, CNone)) (\da c -> ([da], c))
 
   IFt isNone2 f2 tr2 . IFt isNone1 f1 tr1 = IFt (isNoneAnd isNone1 isNone2) f tr
     where
@@ -248,11 +275,11 @@ instance CategoryK IFt where
 
       tr da cc = case decompConn isNone1 isNone2 cc of
         (c1, c2) -> let (db, c1') = tr1 da c1
-                        (dc, c2') = tr2 db c2
+                        (dc, c2') = iterTr tr2 db c2
                     in (dc, joinConn c1' c2')
 
 unitIFt :: IFt s ()
-unitIFt = IFt IsNoneTrue (const ((), CNone)) (\_ _ -> ((), CNone))
+unitIFt = IFt IsNoneTrue (const ((), CNone)) (\_ _ -> (mempty, CNone))
 
 multIFt :: IFt s a -> IFt s b -> IFt s (a, b)
 multIFt (IFt isNone1 f1 tr1) (IFt isNone2 f2 tr2) = IFt (isNoneAnd isNone1 isNone2) f tr
@@ -266,7 +293,7 @@ multIFt (IFt isNone1 f1 tr1) (IFt isNone2 f2 tr2) = IFt (isNoneAnd isNone1 isNon
       let
         (da, c1') = tr1 ds c1
         (db, c2') = tr2 ds c2
-      in ( (da, db), joinConn c1' c2' )
+      in ( map ADFst da <> map ADSnd db, joinConn c1' c2' )
 
 
 -- Then, we focus on the first:
@@ -330,6 +357,11 @@ isNone :: Conn Proxy cs -> IsNone cs
 isNone CNone   = IsNoneTrue
 isNone (CNE _) = IsNoneFalse
 
+
+
+
+
+
 -- data IFq a b =
 --   forall cs.
 --     IFq (Conn Proxy cs)
@@ -339,10 +371,12 @@ isNone (CNE _) = IsNoneFalse
 data IFq a b where
   IFq :: Conn Proxy cs -> (Code a -> CodeC (Code b, Conn PackedCode cs)) -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs)) -> IFq a b
 
+
+
 instance CategoryK IFq where
   type K IFq = Diff
   id = IFq CNone (\a -> return (a, CNone))
-                 (\da _ -> return (da, CNone))
+                 (\da _ -> return (da , CNone))
 
   IFq sh2 f2 tr2 . IFq sh1 f1 tr1 = IFq (joinConn sh1 sh2) f tr
     where
@@ -352,9 +386,9 @@ instance CategoryK IFq where
         return (c, joinConn c1 c2)
 
       tr da cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
-        (db, c1') <- tr1 da c1
-        (dc, c2') <- tr2 db c2
-        return (dc, joinConn c1' c2')
+        (dbs, c1') <- tr1 da c1
+        (dcs, c2') <- tr2 dbs c2
+        return (dcs, joinConn c1' c2')
 
 ifqFromStateless :: (Code a -> Code b) -> (Code (Delta a) -> Code (Delta b)) -> IFq a b
 ifqFromStateless f df = IFq CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df da) ; return (v, CNone) })
@@ -384,7 +418,7 @@ multIFq (IFq sh1 f1 tr1) (IFq sh2 f2 tr2) = IFq (joinConn sh1 sh2) f tr
     tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
       (da, c1') <- tr1 ds c1
       (db, c2') <- tr2 ds c2
-      r <- mkLet [|| ($$da, $$db) ||]
+      r <- mkLet [|| map ADFst $$da <> map ADSnd $$db ||]
       return ( r, joinConn c1' c2' )
 
 
@@ -432,7 +466,7 @@ conn2code' (CJoin c1 c2)         = [|| CJoin $$(conn2code' c1) $$(conn2code' c2)
 
 
 code2conn :: forall cs r. Conn Proxy cs -> Code (Conn Identity cs) -> (Conn PackedCode cs -> Code r) -> Code r
-code2conn CNone      _ k = k CNone
+code2conn CNone      c k = [|| let _ = $$c in $$(k CNone) ||]
 code2conn (CNE pcne) c k = code2conn' pcne [|| unCNE $$c ||] (\x -> k (CNE x))
 
 code2conn' :: forall cs' r. NEConn Proxy cs' -> Code (NEConn Identity cs') -> (NEConn PackedCode cs' -> Code r) -> Code r
@@ -489,7 +523,8 @@ type family Func' (cs :: NETree Type) (a :: Type ) :: Type where
   Func' ('NEOne c) a      = c -> a
   Func' ('NEJoin c1 c2) a = Func' c1 (Func' c2 a)
 
-mkAbs :: Conn Proxy cs -> (Conn PackedCode cs -> Code a) -> Code (Func cs a)
+
+mkAbs :: forall cs a. Conn Proxy cs -> (Conn PackedCode cs -> Code a) -> Code (Func cs a)
 mkAbs CNone k    = k CNone
 mkAbs (CNE cs) k = mkAbs' cs (k . CNE)
 
@@ -497,14 +532,13 @@ mkAbs' :: NEConn Proxy cs -> (NEConn PackedCode cs -> Code a) -> Code (Func' cs 
 mkAbs' (COne _) k      = [|| \a -> $$(k (COne $ PackedCode [|| a ||])) ||]
 mkAbs' (CJoin c1 c2) k = mkAbs' c1 $ \c1' -> mkAbs' c2 $ \c2' -> k (CJoin c1' c2')
 
-mkApp :: Code (Func cs a) -> Conn PackedCode cs -> Code a
+mkApp :: forall cs a. Code (Func cs a) -> Conn PackedCode cs -> Code a
 mkApp f CNone    = f
 mkApp f (CNE cs) = mkApp' f cs
 
 mkApp' :: Code (Func' cs a) -> NEConn PackedCode cs -> Code a
 mkApp' f (COne (PackedCode a)) = [|| $$f $$a ||]
 mkApp' f (CJoin c1 c2)         = mkApp' (mkApp' f c1) c2
-
 
 runIFq :: forall a b. IFq a b -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
 runIFq = \case (IFq _ f tr) ->
@@ -560,15 +594,17 @@ prepare unembedded types for each C, we will prepare one type that works for all
 
 instance Cartesian IFq where
   multS = multIFq
-  unitS = IFq CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| () ||], CNone))
+  unitS = IFq CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| [] ||], CNone))
 
   fstS _ _ = IFq CNone
-                (\as    -> do { v <- mkLet [|| case $$as of { (a, _) -> a } ||] ; return (v, CNone)})
-                (\das _ -> do { vda <- mkLet [|| case $$das of { (da,_) -> da } ||]; return (vda, CNone) } )
+                (\as    -> do { v <- mkLet [|| fst $$as  ||] ; return (v, CNone)})
+                (\das _ -> do { v <- mkLet [|| [ da | ADFst da <- $$das ] ||] ; return (v, CNone) })
+--                (\das _ -> do { vda <- mkLet [|| fst $$das ||]; return (vda, CNone) } )
 
   sndS _ _ = IFq CNone
-                (\as    -> do { v <- mkLet [|| case $$as of { (_, a) -> a } ||] ; return (v, CNone)})
-                (\das _ -> do { vda <- mkLet [|| case $$das of { (_, da) -> da } ||]; return (vda, CNone) } )
+                (\as    -> do { v <- mkLet [|| snd $$as ||] ; return (v, CNone)})
+                (\das _ -> do { v <- mkLet [|| [ da | ADSnd da <- $$das ] ||] ; return (v, CNone) })
+--                (\das _ -> do { vda <- mkLet [|| snd $$das ||]; return (vda, CNone) } )
 
 -- instance AppS IFq where
 --   multS = multIFq
@@ -770,10 +806,10 @@ instance Term IFq IFqT where
       tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
         (da, c1') <- tr1 ds c1
         (db, c2') <- tr2 ds c2
-        r <- mkLet [|| ($$da, $$db) ||]
+        r <- mkLet [|| map ADFst $$da <> map ADSnd $$db ||]
         return ( r, joinConn c1' c2' )
 
-  unitTerm tenv = IFqT tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| () ||], CNone))
+  unitTerm tenv = IFqT tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| [] ||], CNone))
 
   var0Term tenv = IFqT (ECons Proxy tenv)
                        CNone
@@ -909,6 +945,192 @@ share = liftSO2 (Proxy @'[ '[], '[r1] ] ) letTermIFqT
   -- _ $ liftSO (packTermF letTermIFqT)
   -- liftSO (packTermF letTermIFqT) (ECons (Fun ENil (\ENil -> e)) (ECons (Fun (ECons Proxy ENil) (\(ECons x ENil) -> k x)) ENil))
   -- liftSO (\(ECons (TermF e1) (ECons (TermF e2) ENil)) -> letTermIFqT e1 e2) (ECons (Fun ENil (\ENil -> e)) (ECons (Fun (ECons Proxy ENil) (\(ECons x ENil) -> k x)) ENil))
+
+
+data IFqA a b where
+  IFqA ::
+    Conn Proxy cs
+    -> (Code a -> CodeC (Code b, Conn PackedCode cs))
+    -> (Code (AtomicDelta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
+    -> IFqA a b
+
+iterTrC ::
+  forall cs a b.
+  Conn Proxy cs
+  -> (Code (AtomicDelta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
+  -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
+iterTrC proxy h das0 cs0 = CodeC $ \(k :: (Code (Delta b), Conn PackedCode cs) -> Code r) ->
+   [|| let
+        -- iter :: Func cs (Delta b -> Delta a -> (Func cs (Delta b -> r)) -> r)
+        iter acc das =
+          $$(mkAbs proxy $ \cs ->
+                    [|| case das of
+                            []        -> $$(k ([|| acc ||], cs))
+                            da : rest ->
+                                $$(runCodeC (h [|| da ||] cs) $ \(dbs1 :: Code (Delta b), cs') ->
+                                      [|| $$(mkApp [|| iter (acc <> $$dbs1) rest ||] cs') ||])
+                     ||] )
+      in $$(mkApp [|| iter mempty $$das0 ||] cs0)
+--           $$(mkAbs proxy $ \cs -> [|| \acc -> $$(k ([|| acc ||], cs)) ||])
+   ||]
+
+
+ifqAFromStateless :: (Code a -> Code b) -> (Code (Delta a) -> Code (Delta b)) -> IFqA a b
+ifqAFromStateless f df =
+  IFqA CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df [|| [ $$da ] ||]) ; return (v, CNone) })
+
+ifqAFromD :: Diff a => (Code a -> Code b) -> (Code a -> Code (Delta a) -> Code (Delta b)) -> IFqA a b
+ifqAFromD f df =
+  IFqA
+    (CNE (COne Proxy))
+    (\a -> do { v <- mkLet (f a) ; return (v, CNE (COne (PackedCode a))) })
+    (\da (CNE (COne (PackedCode a))) -> do { v <- mkLet (df a [|| [ $$da ] ||]) ; a' <- mkLet [|| applyAtomicDelta $$a $$da ||] ; return (v, CNE (COne (PackedCode a'))) })
+
+ifqAFromFunctions :: Code (a -> (b, c)) -> Code (Delta a -> c -> (Delta b, c)) -> IFqA a b
+ifqAFromFunctions f df =
+  IFqA (CNE (COne Proxy))
+       (\a -> CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))) ) ||])
+       (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
+        [|| let (db, c') = $$df [$$da] $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
+
+ifqAFromStatelessA :: (Code a -> Code b) -> (Code (AtomicDelta a) -> Code (Delta b)) -> IFqA a b
+ifqAFromStatelessA f df =
+  IFqA CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df da) ; return (v, CNone) })
+
+ifqAFromAD :: Diff a => (Code a -> Code b) -> (Code a -> Code (AtomicDelta a) -> Code (Delta b)) -> IFqA a b
+ifqAFromAD f df =
+  IFqA
+    (CNE (COne Proxy))
+    (\a -> do { v <- mkLet (f a) ; return (v, CNE (COne (PackedCode a))) })
+    (\da (CNE (COne (PackedCode a))) -> do { v <- mkLet (df a da) ; a' <- mkLet [|| applyAtomicDelta $$a $$da ||] ; return (v, CNE (COne (PackedCode a'))) })
+
+ifqAFromFunctionsA :: Code (a -> (b, c)) -> Code (AtomicDelta a -> c -> (Delta b, c)) -> IFqA a b
+ifqAFromFunctionsA f df =
+  IFqA (CNE (COne Proxy))
+       (\a -> CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))) ) ||])
+       (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
+        [|| let (db, c') = $$df $$da $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
+
+
+instance CategoryK IFqA where
+  type K IFqA = Diff
+  id = IFqA CNone (\a -> return (a, CNone)) (\da _ -> return ([|| [ $$da ] ||], CNone))
+  IFqA sh2 f2 tr2 . IFqA sh1 f1 tr1 = IFqA (joinConn sh1 sh2) f tr
+    where
+      f a = do
+        (b, c1) <- f1 a
+        (c, c2) <- f2 b
+        return (c, joinConn c1 c2)
+
+      tr da cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+        (dbs, c1') <- tr1 da c1
+        (dcs, c2') <- iterTrC sh2 tr2 dbs c2
+        return (dcs, joinConn c1' c2')
+
+
+
+ifqa2ifq :: IFqA a b -> IFq a b
+ifqa2ifq (IFqA sh f tr) = IFq sh f (iterTrC sh tr)
+
+runIFqA :: IFqA a b -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
+runIFqA = runIFq . ifqa2ifq
+
+
+data PackedCodeAtomicDelta a where
+  PackedCodeAtomicDelta :: Diff a => Code (AtomicDelta a) -> PackedCodeAtomicDelta a
+
+mkUpdateEnv :: Index PackedCodeAtomicDelta as -> Env PackedCode as -> CodeC (Env PackedCode as)
+mkUpdateEnv (IndexZ (PackedCodeAtomicDelta da)) (ECons (PackedCode a) as) = do
+  a' <- mkLet [|| applyAtomicDelta $$a $$da ||]
+  return (ECons (PackedCode a') as)
+mkUpdateEnv (IndexS ix) (ECons a as) = do
+  as' <- mkUpdateEnv ix as
+  return $ ECons a as'
+
+
+
+data IFqAT as b =
+  forall cs. IFqAT (Env Proxy as)
+                   (Conn Proxy cs)
+                   (Env PackedCode as -> CodeC (Code b, Conn PackedCode cs))
+                   (Index PackedCodeAtomicDelta as -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
+
+
+instance HasProduct IFqA where
+  type Unit IFqA = ()
+  type Prod IFqA a b = (a, b)
+
+  unitOk _ = Wit
+  prodOk _ _ _ = Wit
+
+instance Term IFqA IFqAT where
+  mapTerm (IFqA sh2 f2 tr2) (IFqAT tenv sh1 f1 tr1) = IFqAT tenv (joinConn sh1 sh2) f tr
+    where
+      f a = do
+        (b, c1) <- f1 a
+        (c, c2) <- f2 b
+        return (c, joinConn c1 c2)
+
+      tr da cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+        (db, c1') <- tr1 da c1
+        (dc, c2') <- iterTrC sh2 tr2 db c2
+        return (dc, joinConn c1' c2')
+
+  multTerm (IFqAT tenv sh1 f1 tr1) (IFqAT _ sh2 f2 tr2) = IFqAT tenv (joinConn sh1 sh2) f tr
+    where
+      f s = do
+        (a, c1) <- f1 s
+        (b, c2) <- f2 s
+        r <- mkLet [|| ($$a, $$b) ||]
+        return (r , joinConn c1 c2)
+
+      tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+        (da, c1') <- tr1 ds c1
+        (db, c2') <- tr2 ds c2
+        r <- mkLet [|| map ADFst $$da <> map ADSnd $$db ||]
+        return ( r, joinConn c1' c2' )
+
+  unitTerm tenv = IFqAT tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| [] ||], CNone))
+
+  var0Term tenv = IFqAT (ECons Proxy tenv)
+                        CNone
+                        (\(ECons (PackedCode a) _) -> return (a, CNone))
+                        (\denv _ -> case denv of
+                            IndexZ (PackedCodeAtomicDelta da) -> return ([|| [ $$da ] ||], CNone)
+                            _         -> return ([|| [] ||], CNone))
+--                         (\(ECons (PackedCodeDelta da) _) _ -> return (da, CNone))
+
+  weakenTerm (IFqAT tenv i f tr) = IFqAT (ECons Proxy tenv) i f' tr'
+    where
+      f'  (ECons _ s) = f s
+      tr' (IndexS ix) = tr ix
+      tr' _           = \cs -> return ([|| [] ||],  cs)
+
+  unliftTerm (IFqAT _ i f tr) = IFqA i f' tr'
+    where
+      f'  a  = f  (ECons (PackedCode       a) ENil)
+      tr' da = tr (IndexZ (PackedCodeAtomicDelta da))
+
+
+letTermIFqAT :: Diff b1 => IFqAT as b1 -> IFqAT (b1 : as) b2 -> IFqAT as b2
+letTermIFqAT (IFqAT tenv sh1 f1 tr1) (IFqAT _ sh2 f2 tr2) = IFqAT tenv (joinConn sh1 sh2) f tr
+  where
+    f s = do
+      (a, c1) <- f1 s
+      v <- mkLet a
+      (b, c2) <- f2 (ECons (PackedCode v) s)
+      return (b, joinConn c1 c2)
+
+    tr s cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+      (da, c1') <- tr1 s c1
+      dvs <- mkLet da
+      (db1, c2' ) <- tr2 (IndexS s) c2
+      (db2, c2'') <- iterTrC sh2 (\dv -> tr2 (IndexZ $ PackedCodeAtomicDelta dv)) dvs c2'
+      return ([|| $$db1 <> $$db2 ||], joinConn c1' c2'')
+
+-- FIXME: tentative
+shareA :: forall e r1 r2. (Diff r1, App2 IFqA IFqAT e) => e r1 -> (e r1 -> e r2) -> e r2
+shareA = liftSO2 (Proxy @'[ '[], '[r1] ] ) letTermIFqAT
 
 
 

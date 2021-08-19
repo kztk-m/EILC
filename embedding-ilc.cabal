@@ -23,7 +23,7 @@ common deps
     build-depends: 
         base ^>= 4.13 || ^>= 4.14, 
         template-haskell, 
-        containers
+        containers, 
                    
     default-language: Haskell2010
 
