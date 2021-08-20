@@ -39,22 +39,6 @@ Then, our task is:
 
 The definition fo this API depends on a concrete definition of Δ(Sequence a), but with appropriate definitions of them, we can give one. 
 
-Is it possible to have an internal hom object in the category? We do not think so. This is due to the abstract nature of `C`. If `C` is concrete, we have 
-
-    (Γ × A -> B × C) × (ΔΓ × ΔA × C -> ΔB × C)
-    ~ (Γ -> [A, B] × C') × (ΔΓ × C' -> Δ[A, B] × C')
-
-by taking `C' = 1`, `[A,B] = A -> Writer C B`, and `Δ[A,B] = ΔA -> State C ΔB`; what is important here is that `[A,B]` and `Δ[A,B]` uses the same `C`. 
-
-In the original calculus, `C = Γ × A` and the second component of the initializer is redundant as it just copies the input. In this situation, the equation becomes
-
-    (Γ × A -> B) × (ΔΓ × ΔA × Γ × A -> ΔB)
-    ~ (Γ -> [A, B]) × (ΔΓ × Γ -> Δ[A, B])
-
-and solved straightforwardly by taking `[A,B] = A -> B` and `Δ[A,B] = A -> ΔA -> ΔB`.
-
-
-Anyway, we are able to use the host language's higher-order functions, which essentially interprets the host system in presheaf (in an enriched category). 
 
 Also, we can handle 2nd order APIs, which would be useful for the uses cases discussed by Giarrusso et al.'s (**Really?**). 
 
@@ -67,6 +51,8 @@ Also, we can handle 2nd order APIs, which would be useful for the uses cases dis
 
 Having this function is possible; to do so we will take Γ × C1 × Sequence C2. 
 Γ is required as we need to run a function of type `A -> B × C2`. We collect the produced C2 to make `Sequence C2`. 
+
+---
 
 ~~**Note on Aug 18, 2021** I realized that the story is not that simple. Consider the case where we obtain the identity change for `Δ(Sequence A)` part, whereas `ΔΓ` is not the identity change---this actually can happen for the `cartesianProd as bs` above when the change to `as` is the identity update.~~ 
 
@@ -107,7 +93,11 @@ f <> g = \c ->
 
 Thus, we can use `hmap` to convert `(Δ₁a -> c -> (Δb × c))` into `(Δa -> c -> (Δb × c))` so that we can define a composition. 
 
-**Note on Aug 19** The new implementation works but the quality of the generated code is proof due to composion. 
+---
+
+**Note on Aug 19** The new implementation works but the quality of the generated code is poor due to multiple use of continuation code. 
+
+---
 
 
 ## General I/F 
@@ -156,3 +146,57 @@ Anyway, it seems to me that `op` should have the following semantics.
      ⟦ op ⟧ : forall p. SemTerm (~A1 ++ p) B -> ... -> SemTerm (~A2 ++ p) B -> SemTerm p B 
 
 Can we provide a general extender for this? 
+
+## Function Objects
+
+
+Is it possible to have an internal hom object in the category? We do not think so. This is due to the abstract nature of `C`. If `C` is concrete, we have 
+
+    (Γ × A -> B × C) × (ΔΓ × ΔA × C -> ΔB × C)
+    ~ (Γ -> [A, B] × C') × (ΔΓ × C' -> Δ[A, B] × C')
+
+by taking `C' = 1`, `[A,B] = A -> Writer C B`, and `Δ[A,B] = ΔA -> State C ΔB`; what is important here is that `[A,B]` and `Δ[A,B]` uses the same `C`. 
+
+----
+**Note on Aug. 20** Rethinking the problem again, it seems to me that we can take `C'` as `B -> C`, `[A,B] = A -> B` (as standard) and `Δ[A,B] = A -> ΔB` would work.
+
+
+```
+--    (Γ × A -> B × C) × (ΔΓ × ΔA × C -> ΔB × C)
+--    ---------------------------------------------------------------------conv
+--    (Γ -> (A -> B) × (A -> C)) × (ΔΓ × (A -> C) -> (A -> ΔB) × (A -> C)))
+conv (f, tr) = (f', tr') 
+  where 
+   f' env = (\a -> fst (f (env, a)), \a -> snd (f (env, a)))
+   tr' (denv, c) = (\a -> fst (tr (denv, 0, c a)),
+                    \a -> snd (tr (denv, 0, c a)))
+
+--    (Γ -> (A -> B) × C) × (ΔΓ × C -> (A -> ΔB) × C)
+--    -------------------------------------------------------unconv
+--    (Γ × A -> B × C × A) × (ΔΓ × ΔA × C × A -> ΔB × C × A)
+unconv (f, tr) = (f', tr') 
+  where
+    f' (env, a) = let (h, c) = f env in (h a, c, a) 
+    tr' (denv, da, c, a) = 
+       let (h, c') = tr (denv, c) 
+           a' = a + da 
+           db = h a' 
+        in (db, c', a') 
+```
+
+(I have not checked they are roundtripping assumeing some properties on `f` and `tr`. We may also need to use the parametricity for existential types.)
+
+
+However, this approach essentially prevents the function object to be incremental. This behavior, while unwelcome, would make sense, because where the function `A -> B` is applied depends on `Γ` and thus we cannot know beforehand how to construct the connection between `Γ × A` and `B`. 
+
+----
+
+In the original calculus, `C = Γ × A` and the second component of the initializer is redundant as it just copies the input. In this situation, the equation becomes
+
+    (Γ × A -> B) × (ΔΓ × ΔA × Γ × A -> ΔB)
+    ~ (Γ -> [A, B]) × (ΔΓ × Γ -> Δ[A, B])
+
+and solved straightforwardly by taking `[A,B] = A -> B` and `Δ[A,B] = A -> ΔA -> ΔB`.
+
+
+Anyway, we are able to use the host language's higher-order functions, which essentially interprets the host system in presheaf (in an enriched category). 
