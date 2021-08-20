@@ -1,3 +1,5 @@
+# Discussions on Higher-Order APIs
+
 A interesting problem comes form Giarrusso et al.'s paper: What happens if APIs contains higher-orderness? 
 
 An illustrative example is:
@@ -59,6 +61,7 @@ Having this function is possible; to do so we will take Γ × C1 × Sequence C2.
 ~~So, we need to run the function `(ΔΓ × ΔA × C2 -> ΔB × C2)` with identity changes on `A` for unchanged parts in a list. To do so, we also need to keep the `Sequence A` part in addition. So, `C` must be `Γ × Sequence (A × C2) × C1`.~~
 
 **Note on Aug 19, 2021** 
+[This approach is not effective at all. See the comment on Aug 20]
 Considering the situation that we use the derivative to propagate a part of an update, we need to make sure that we do not duplicate updates unnecessarily. 
 
 A careful treatment is needed for products: `Δ(A × B) ~ ΔA × ΔB`. Consider consecutive updates on `da₁ + da₂` and `db₁ + db₂` on `A` and `B`, respectively. Then, we have `(da₁ + da₂, db₁ + db₂) ~ (da₁, db₁) + (da₂, db₂)`, which might look unsurprising. However, things become difficult when we want to break down an update `da` into atomic ones `da₁ + da₂ + ... + daₙ`, process each `daᵢ` individually, and compose the results to obtain the result for `da`. Then, the treatment of products becomes an issue as it disallows us to process each component separately. For example, if we happen to know `da = da₁ + da₂ + ... + daₙ`, we can decompose the update `(da, db)` into either of 
@@ -93,11 +96,16 @@ f <> g = \c ->
 
 Thus, we can use `hmap` to convert `(Δ₁a -> c -> (Δb × c))` into `(Δa -> c -> (Δb × c))` so that we can define a composition. 
 
----
-
 **Note on Aug 19** The new implementation works but the quality of the generated code is poor due to multiple use of continuation code. 
 
+**Note on Aug 20** I should rethink about the approach to consider atomic updates. In a naive approach, we should consider atomic update to environments. But, this approach requires us to copy continue code twice for `let` and `map`, for which we need to propagate updates both on `A` and `Γ` to produce an update on `B`. The index-based approach, in which indices are "static" information to avoid the indexing cost in runtime, requires us to __use__ (not just **run**) the continuation code (that corresponds to a term-in-context `Γ, x : A ⊢ e : B` as the generated code can differ for the index given. The produced code must handle the case where `x` is updated and somewhere in `Γ` is updated, but we cannot handle this case by using the one code obtained from `e` as the generated code for these cases can be different. 
+
+Also, even though we consider atomic updates, what we will obtain is the sequence of updates on the sequence instead of an atomic update, and we have to consider how to combine them with an update on `\Gamma`; the source of the trouble mentioned above is still there. Notice that we cannot assume that an atomic update is produced for an atomic update. The granularity of updates may differ for data. It may be impossible for us to avoid running the code as many as the number of atomic updates, but we are hoping that this can be done by using one code. 
+
+
 ---
+
+
 
 
 ## General I/F 
