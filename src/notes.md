@@ -61,7 +61,7 @@ Having this function is possible; to do so we will take Γ × C1 × Sequence C2.
 ~~So, we need to run the function `(ΔΓ × ΔA × C2 -> ΔB × C2)` with identity changes on `A` for unchanged parts in a list. To do so, we also need to keep the `Sequence A` part in addition. So, `C` must be `Γ × Sequence (A × C2) × C1`.~~
 
 **Note on Aug 19, 2021** 
-[This approach is not effective at all. See the comment on Aug 20]
+__[This approach is not effective at all. See the comment on Aug 20]__
 Considering the situation that we use the derivative to propagate a part of an update, we need to make sure that we do not duplicate updates unnecessarily. 
 
 A careful treatment is needed for products: `Δ(A × B) ~ ΔA × ΔB`. Consider consecutive updates on `da₁ + da₂` and `db₁ + db₂` on `A` and `B`, respectively. Then, we have `(da₁ + da₂, db₁ + db₂) ~ (da₁, db₁) + (da₂, db₂)`, which might look unsurprising. However, things become difficult when we want to break down an update `da` into atomic ones `da₁ + da₂ + ... + daₙ`, process each `daᵢ` individually, and compose the results to obtain the result for `da`. Then, the treatment of products becomes an issue as it disallows us to process each component separately. For example, if we happen to know `da = da₁ + da₂ + ... + daₙ`, we can decompose the update `(da, db)` into either of 
@@ -102,6 +102,8 @@ Thus, we can use `hmap` to convert `(Δ₁a -> c -> (Δb × c))` into `(Δa -> c
 
 Also, even though we consider atomic updates, what we will obtain is the sequence of updates on the sequence instead of an atomic update, and we have to consider how to combine them with an update on `\Gamma`; the source of the trouble mentioned above is still there. Notice that we cannot assume that an atomic update is produced for an atomic update. The granularity of updates may differ for data. It may be impossible for us to avoid running the code as many as the number of atomic updates, but we are hoping that this can be done by using one code. 
 
+
+**Aug 26, 2021** The issue of code duplication has been resolved. However, the result is not yet satisfactory. We need to know whether `ΔΓ` affects the delta translator `(ΔΓ × ΔA × C2 -> ΔB × C2)`, as it requires us to map the function to the connections (caches) (`Sequence C2`), which is rather costly. Also, the `map` API requires us to run `f` of `map f` if an insertion happens. To handle the case, the implementation of the API map keep the `Γ` to obtain an updated version of `f`, while we know updating the free variables in `f` (or `f`'s closure is enough).
 
 ---
 
