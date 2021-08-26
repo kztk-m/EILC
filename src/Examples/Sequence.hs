@@ -88,20 +88,20 @@ rearrSeq i n j s0 =
 dsingleton :: AtomicDelta a -> Delta (S a)
 dsingleton da = injMonoid $ coerce $ SRep 0 da
 
-singletonF :: (App2 IFqA IFqAT e, Diff a) => e a -> e (S a)
+singletonF :: (App2 IFq IFqT e, Diff a) => e a -> e (S a)
 singletonF = lift singletonC
   where
     singletonC =
-      ifqAFromStatelessA (\a -> [|| S (Seq.singleton $$a) ||])
-                         (\da -> [|| dsingleton $$da ||])
+      ifqFromStatelessA (\a -> [|| S (Seq.singleton $$a) ||])
+                        (\da -> [|| dsingleton $$da ||])
 
 dempty :: Delta (S a)
 dempty = mempty
 
-emptyF :: (App2 IFqA IFqAT e, Diff a) => e (S a)
+emptyF :: (App2 IFq IFqT e, Diff a) => e (S a)
 emptyF = lift emptyC unit
   where
-    emptyC = ifqAFromStatelessA (const [|| S Seq.empty ||]) (const [|| dempty ||])
+    emptyC = ifqFromStatelessA (const [|| S Seq.empty ||]) (const [|| dempty ||])
 
 type ConcatC = Seq.Seq Int
 
@@ -170,8 +170,8 @@ trConcatCAtomic (SRep i ds) c =
     goAtomic offset (SRearr j n k) ci =
       (injMonoid (SRearr (offset + j) n (offset + k)), ci)
 
-concatF :: (App2 IFqA IFqAT e, Diff a) => e (S (S a)) -> e (S a)
-concatF = lift $ ifqAFromFunctionsA [|| concatC ||] [|| trConcatCAtomic ||]
+concatF :: (App2 IFq IFqT e, Diff a) => e (S (S a)) -> e (S a)
+concatF = lift $ ifqFromFunctionsA [|| concatC ||] [|| trConcatCAtomic ||]
 
 
 
@@ -256,6 +256,16 @@ infixr 5 @+
 
 --   ||]
 
+mapTr ::
+  (a -> (b, c)) -> (Bool -> Delta a -> c -> (Delta b, c))
+  -> Seq c -> Delta (S a) -> (Delta (S b), Seq c )
+mapTr f dfb cs ds =
+  let -- FIXME: can we avoid this step in some ways?
+      (dbs1, cs') = mapTrUnchanged (dfb True mempty) cs
+      (dbs2, cs'') = iterTr (mapTrChanged f (dfb False Prelude.. pure)) ds cs'
+  in (dbs1 <> dbs2, cs'')
+  where
+
 sequenceDelta :: Seq (Delta a) -> Delta (S a)
 sequenceDelta s =
   mconcat $ zipWith (\i -> fmap (SRep i)) [0..] (Data.Foldable.toList s)
@@ -311,10 +321,10 @@ type MapC s cs1 cs2 =
     @+ 'NE ('NEOne (Seq.Seq (Conn Identity cs2)))
     @+ UnFlatten s
 
-mapT :: forall s a b. Diff a => IFqAT s (S a) -> IFqAT (a ': s) b -> IFqAT s (S b)
-mapT (IFqAT tenv (sh1 :: Conn Proxy cs1) f1 tr1)
-     (IFqAT _    (sh2 :: Conn Proxy cs2) f2 tr2) =
-      IFqAT @s @(S b) @(MapC s cs1 cs2) tenv sh f tr
+mapT :: forall s a b. Diff a => IFqT s (S a) -> IFqT (a ': s) b -> IFqT s (S b)
+mapT (IFqT tenv (sh1 :: Conn Proxy cs1) f1 tr1)
+     (IFqT _    (sh2 :: Conn Proxy cs2) f2 tr2) =
+      IFqT @s @(S b) @(MapC s cs1 cs2) tenv sh f tr
        -- IFqT @s @(S b) @(Join cs1 ('NE ('NEOne (Seq.Seq (Conn Identity cs2))))) sh f tr
   where
     sh :: Conn Proxy (MapC s cs1 cs2)
@@ -344,6 +354,14 @@ mapT (IFqAT tenv (sh1 :: Conn Proxy cs1) f1 tr1)
         \a -> $$( runCodeC (f2 (ECons (PackedCode [|| a ||]) env)) $ \(b, c') -> [|| ($$b, $$(conn2code c')) ||])
       ||]
 
+    trh :: Env PackedCodeDelta s -> Conn Proxy cs2 -> Code (Bool -> Delta a -> Conn Identity cs2 -> (Delta b, Conn Identity cs2))
+    trh env pcs = [|| \b da c ->
+      $$(code2conn pcs [|| c ||] $ \cs ->
+        let env' = mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) env
+        in runCodeC (tr2 (ECons (PackedCodeDelta [|| da ||]) env') cs) $ \(db, cs') ->
+          [|| ($$db, $$(conn2code cs') ) ||])
+      ||]
+
     -- trh :: Env PackedCodeDelta s -> Conn Proxy cs2 -> Code (Delta a -> Conn Identity cs2 -> (Delta b , Conn Identity cs2))
     -- trh env pcs = [|| \da c ->
     --     $$(code2conn pcs [|| c ||] $ \cs ->
@@ -351,16 +369,15 @@ mapT (IFqAT tenv (sh1 :: Conn Proxy cs1) f1 tr1)
     --         [|| ($$db, $$(conn2code cs')) ||])
     --   ||]
 
-    -- mkLetEnv = mapEnvA (\(PackedCode c) -> do { v <- mkLet c ; pure (PackedCode v) })
 
-    procUnchanged ::
-      Index PackedCodeAtomicDelta s -> Conn Proxy cs2
-        -> Code (Conn Identity cs2 -> (Delta b, Conn Identity cs2))
-    procUnchanged denv pcs = [|| \c ->
-          $$(code2conn pcs [|| c ||] $ \cs ->
-            runCodeC (tr2 (IndexS denv) cs) $ \(db, cs') ->
-              [|| ($$db, $$(conn2code cs')) ||])
-      ||]
+    -- procUnchanged ::
+    --   Env PackedCodeDelta s -> Conn Proxy cs2
+    --     -> Code (Conn Identity cs2 -> (Delta b, Conn Identity cs2))
+    -- procUnchanged denv pcs = [|| \c ->
+    --       $$(code2conn pcs [|| c ||] $ \cs ->
+    --         runCodeC (tr2 (IndexS denv) cs) $ \(db, cs') ->
+    --           [|| ($$db, $$(conn2code cs')) ||])
+    --   ||]
 
     -- procChanged ::
     --   Index PackedCodeAtomicDelta s -> Conn Proxy cs2
@@ -372,16 +389,29 @@ mapT (IFqAT tenv (sh1 :: Conn Proxy cs1) f1 tr1)
     --     return [|| ($$db1 <> $$db2, $$(conn2code cs2)) ||])
     --   ||]
 
-    procChangedAfterEnvChange ::
-      Conn Proxy cs2
-      -> Code (AtomicDelta a -> Conn Identity cs2 -> (Delta b, Conn Identity cs2))
-    procChangedAfterEnvChange pcs = [|| \da c ->
-        $$(code2conn pcs [|| c ||] $ \cs -> toCode $ do
-          (db, cs') <- tr2 (IndexZ (PackedCodeAtomicDelta [|| da ||])) cs
-          return [|| ($$db, $$(conn2code cs')) ||])
-      ||]
+    -- procChangedAfterEnvChange ::
+    --   Conn Proxy cs2
+    --   -> Code (AtomicDelta a -> Conn Identity cs2 -> (Delta b, Conn Identity cs2))
+    -- procChangedAfterEnvChange pcs = [|| \da c ->
+    --     $$(code2conn pcs [|| c ||] $ \cs -> toCode $ do
+    --       (db, cs') <- tr2 (IndexZ (PackedCodeAtomicDelta [|| da ||])) cs
+    --       return [|| ($$db, $$(conn2code cs')) ||])
+    --   ||]
 
-    tr :: Index PackedCodeAtomicDelta s
+    -- procUpdate ::
+    --   Conn Proxy cs2
+    --   -> Index PackedCodeAtomicDelta s
+    --   -> Code (Maybe (AtomicDelta a) -> Conn Identity cs2 -> (Delta b, Conn Identity cs2))
+    -- procUpdate pcs denv = [|| \mda c ->
+    --   let delta = case mda of { Just da ->
+    --   $$(code2conn pcs [|| c ||] $ \cs -> toCode $ do
+    --     (db, cs') <- iterTrC pcs tr2 (
+
+    mkLetEnv :: Env PackedCode aa -> CodeC (Env PackedCode aa)
+    mkLetEnv = mapEnvA (\(PackedCode c) -> PackedCode <$> mkLet c)
+
+
+    tr :: Env PackedCodeDelta s
          -> Conn PackedCode (MapC s cs1 cs2)
          -> CodeC
               (Code (Delta (S b)), Conn PackedCode (MapC s cs1 cs2))
@@ -389,33 +419,35 @@ mapT (IFqAT tenv (sh1 :: Conn Proxy cs1) f1 tr1)
       case c2 of
         CNE (COne (PackedCode cs2)) -> do
           let env = unconvertEnv tenv c3
-          -- mkLetEnv $
-          --            zipWithEnv (\(PackedCode a) (PackedCodeDelta da) -> PackedCode [|| $$a /+ $$da ||]) env denv
 
-          -- First compute the effect of denv
-          env' <- mkUpdateEnv denv env
-          (dbs1, cs2')  <- CodeC $ \k -> [|| let (dbs, cs2') = mapTrUnchanged $$(procUnchanged denv sh2) $$cs2 in $$(k ([|| dbs ||], [|| cs2' ||])) ||]
+          -- FIXME: This is a source of potential slow down.
+          env' <- mkLetEnv $ zipWithEnv (\(PackedCode a) (PackedCodeDelta da) -> PackedCode [|| $$a /+ $$da ||]) env denv
+
           (das, c1') <- tr1 denv c1
+          (dbs, cs2') <- CodeC $ \k -> [||
+              let fElem  = $$(h env')
+                  trElem = $$(trh denv sh2)
+                  (dbs, cs2') = mapTr fElem trElem $$cs2 $$das
+              in $$(k ([|| dbs ||], [|| cs2' ||]))
+            ||]
 
-          -- Then, compute the effect of das
-          (dbs2, cs2'') <- CodeC $ \k -> [|| let (dbs, cs2'') = iterTr (mapTrChanged $$(h env') $$(procChangedAfterEnvChange sh2)) $$das $$cs2' in $$(k ([|| dbs ||], [|| cs2'' ||]) ) ||]
---          (dbs, cs2' :: Code (Seq.Seq (Conn Identity cs2, a))) <- CodeC $ \k -> [|| let (dbs, cs2') = mapTr $$(h env') $$(trh denv sh2) $$cs2 $$das in $$(k ([|| dbs ||], [|| cs2' ||])) ||]
---          (dbs, cs2') <- CodeC $ \k -> [|| let (dbs, cs2') = mapTr $$(h env') $$(procUnchanged denv sh2) $$(procChanged denv sh2) $$cs2 $$das in $$(k ([|| dbs ||], [|| cs2' ||])) ||]
+
+
           -- FIXME: potential source of slow down.
-          return ([|| $$dbs1 <> $$dbs2 ||], joinConn c1' (joinConn (CNE $ COne $ PackedCode cs2'') (convertEnv env')))
+          return ([|| $$dbs ||], joinConn c1' (joinConn (CNE $ COne $ PackedCode cs2') (convertEnv env')))
 
-mapF :: forall e a b. (App2 IFqA IFqAT e, Diff a) => (e a -> e b) -> e (S a) -> e (S b)
+mapF :: forall e a b. (App2 IFq IFqT e, Diff a) => (e a -> e b) -> e (S a) -> e (S b)
 mapF = flip (liftSO2 (Proxy @'[ '[], '[a] ]) mapT)
 
-fstF :: (App2 IFqA IFqAT e, Diff a, Diff b) => e (a, b) -> e a
-fstF = lift $ ifqAFromStatelessA (\a -> [|| fst $$a ||]) (\dz -> [|| fstDeltaA $$dz||])
+fstF :: (App2 IFq IFqT e, Diff a, Diff b) => e (a, b) -> e a
+fstF = lift $ ifqFromStatelessA (\a -> [|| fst $$a ||]) (\dz -> [|| fstDeltaA $$dz||])
 
-sndF :: (App2 IFqA IFqAT e, Diff a, Diff b) => e (a, b) -> e b
-sndF = lift $ ifqAFromStatelessA (\a -> [|| snd $$a ||]) (\dz -> [|| sndDeltaA $$dz ||])
+sndF :: (App2 IFq IFqT e, Diff a, Diff b) => e (a, b) -> e b
+sndF = lift $ ifqFromStatelessA (\a -> [|| snd $$a ||]) (\dz -> [|| sndDeltaA $$dz ||])
 
 
 
-cartesian :: (App2 IFqA IFqAT e, Diff a, Diff b) => e (S a) -> e (S b) -> e (S (a, b))
+cartesian :: (App2 IFq IFqT e, Diff a, Diff b) => e (S a) -> e (S b) -> e (S (a, b))
 cartesian as bs =
   concatMapF (\a -> mapF (pair a) bs) as
   where
@@ -432,7 +464,7 @@ testCode ::
     ((S Int, S Int)
     -> (S (Int, Int),
         Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int)))))
-testCode = runIFqA $ runMono $ \xs -> cartesian (fstF xs) (sndF xs)
+testCode = runIFq $ runMono $ \xs -> cartesian (fstF xs) (sndF xs)
 
 
 
@@ -454,3 +486,208 @@ testCode = runIFqA $ runMono $ \xs -> cartesian (fstF xs) (sndF xs)
 -- monoidFromList [SDel 0 3]
 -- monoidFromList [SIns 3 (S {unS = fromList [(1,40)]}),SIns 7 (S {unS = fromList [(2,40)]}),SIns 11 (S {unS = fromList [(3,40)]})]
 -- monoidFromList [SDel 0 1,SDel 2 1,SDel 4 1]
+
+
+{-
+   (ensureDiffType
+       $ (\ pa_ah3U pb_ah3V a_ah3W
+            -> let v_ah3X = fst a_ah3W in
+               let
+                 (bs_ah3Y, cs_ah3Z)
+                   = (Seq.unzip
+                        $ (fmap
+                             (\ a_ah40
+                                -> let v_ah41 = snd a_ah3W in
+                                   let
+                                     (bs_ah42, cs_ah43)
+                                       = (Seq.unzip
+                                            $ (fmap
+                                                 (\ a_ah44
+                                                    -> let v_ah45 = (a_ah40, a_ah44)
+                                                       in (v_ah45, CNone)))
+                                                (unS v_ah41))
+                                   in
+                                     (S bs_ah42,
+                                      CNE
+                                        ((CJoin (COne (Identity cs_ah43)))
+                                           ((CJoin (COne (Identity a_ah40)))
+                                              (COne (Identity a_ah3W)))))))
+                            (unS v_ah3X)) in
+               let (b_ah46, c_ah47) = concatC (S bs_ah3Y)
+               in
+                 (b_ah46,
+                  let
+                    func_ah48
+                      = \ a_ah49
+                          -> \ a_ah4a
+                               -> \ a_ah4b
+                                    -> ((mkInteraction pa_ah3U) pb_ah3V
+                                          $ (\ da_ah4c
+                                               -> let v_ah4d = (a_ah4a /+ da_ah4c) in
+                                                  let
+                                                    f_ah4e da_ah4f cont_ah4g
+                                                      = \ acc_ah4h
+                                                          -> let v_ah4i = fstDeltaA da_ah4f
+                                                             in cont_ah4g (acc_ah4h <> v_ah4i)
+                                                  in
+                                                    (((foldrDelta f_ah4e)
+                                                        (\ acc_ah4j
+                                                           -> let
+                                                                fElem_ah4l
+                                                                  = \ a_ah4o
+                                                                      -> let v_ah4p = snd v_ah4d in
+                                                                         let
+                                                                           (bs_ah4q, cs_ah4r)
+                                                                             = (Seq.unzip
+                                                                                  $ (fmap
+                                                                                       (\ a_ah4s
+                                                                                          -> let
+                                                                                               v_ah4t
+                                                                                                 = (a_ah4o,
+                                                                                                    a_ah4s)
+                                                                                             in
+                                                                                               (v_ah4t,
+                                                                                                CNone)))
+                                                                                      (unS v_ah4p))
+                                                                         in
+                                                                           (S bs_ah4q,
+                                                                            CNE
+                                                                              ((CJoin
+                                                                                  (COne
+                                                                                     (Identity
+                                                                                        cs_ah4r)))
+                                                                                 ((CJoin
+                                                                                     (COne
+                                                                                        (Identity
+                                                                                           a_ah4o)))
+                                                                                    (COne
+                                                                                       (Identity
+                                                                                          v_ah4d)))))
+                                                                trElem_ah4k
+                                                                  = \ b_ah4u da_ah4v c_ah4w
+                                                                      -> let
+                                                                           (c1_ah4x, c2_ah4y)
+                                                                             = unCJoin
+                                                                                 (unCNE c_ah4w) in
+                                                                         let
+                                                                           (c1_ah4z, c2_ah4A)
+                                                                             = unCJoin c2_ah4y in
+                                                                         let
+                                                                           v_ah4B
+                                                                             = (runIdentity
+                                                                                  (unCOne c2_ah4A)
+                                                                                  /+
+                                                                                    (if b_ah4u then
+                                                                                         da_ah4c
+                                                                                     else
+                                                                                         mempty)) in
+                                                                         let
+                                                                           v_ah4C
+                                                                             = (runIdentity
+                                                                                  (unCOne c1_ah4z)
+                                                                                  /+ da_ah4v) in
+                                                                         let
+                                                                           f_ah4D da_ah4E cont_ah4F
+                                                                             = \ acc_ah4G
+                                                                                 -> let
+                                                                                      v_ah4H
+                                                                                        = sndDeltaA
+                                                                                            da_ah4E
+                                                                                    in
+                                                                                      cont_ah4F
+                                                                                        (acc_ah4G
+                                                                                           <>
+                                                                                             v_ah4H)
+                                                                         in
+                                                                           (((foldrDelta f_ah4D)
+                                                                               (\ acc_ah4I
+                                                                                  -> let
+                                                                                       fElem_ah4K
+                                                                                         = \ a_ah4N
+                                                                                             -> let
+                                                                                                  v_ah4O
+                                                                                                    = (v_ah4C,
+                                                                                                       a_ah4N)
+                                                                                                in
+                                                                                                  (v_ah4O,
+                                                                                                   CNone)
+                                                                                       trElem_ah4J
+                                                                                         = \ b_ah4P
+                                                                                             da_ah4Q
+                                                                                             c_ah4R
+                                                                                             -> let
+                                                                                                  _ = c_ah4R in
+                                                                                                let
+                                                                                                  v_ah4S
+                                                                                                    = (pairDelta
+                                                                                                         (if b_ah4P then
+                                                                                                              da_ah4v
+                                                                                                          else
+                                                                                                              mempty))
+                                                                                                        da_ah4Q
+                                                                                                in
+                                                                                                  (v_ah4S,
+                                                                                                   CNone)
+                                                                                       (dbs_ah4L,
+                                                                                        cs2'_ah4M)
+                                                                                         = (((mapTr
+                                                                                                fElem_ah4K)
+                                                                                               trElem_ah4J)
+                                                                                              (runIdentity
+                                                                                                 (unCOne
+                                                                                                    c1_ah4x)))
+                                                                                             acc_ah4I
+                                                                                     in
+                                                                                       (dbs_ah4L,
+                                                                                        CNE
+                                                                                          ((CJoin
+                                                                                              (COne
+                                                                                                 (Identity
+                                                                                                    cs2'_ah4M)))
+                                                                                             ((CJoin
+                                                                                                 (COne
+                                                                                                    (Identity
+                                                                                                       v_ah4C)))
+                                                                                                (COne
+                                                                                                   (Identity
+                                                                                                      v_ah4B)))))))
+                                                                              (if b_ah4u then
+                                                                                   da_ah4c
+                                                                               else
+                                                                                   mempty))
+                                                                             mempty
+                                                                (dbs_ah4m, cs2'_ah4n)
+                                                                  = (((mapTr fElem_ah4l)
+                                                                        trElem_ah4k)
+                                                                       a_ah49)
+                                                                      acc_ah4j in
+                                                              let
+                                                                f_ah4T da_ah4U cont_ah4V
+                                                                  = \ acc_ah4W
+                                                                      -> \ a_ah4X
+                                                                           -> let
+                                                                                (db_ah4Y, c'_ah4Z)
+                                                                                  = (trConcatCAtomic
+                                                                                       da_ah4U)
+                                                                                      a_ah4X
+                                                                              in
+                                                                                (cont_ah4V
+                                                                                   (acc_ah4W
+                                                                                      <> db_ah4Y))
+                                                                                  c'_ah4Z
+                                                              in
+                                                                ((((foldrDelta f_ah4T)
+                                                                     (\ acc_ah50
+                                                                        -> \ a_ah51
+                                                                             -> (acc_ah50,
+                                                                                 ((func_ah48
+                                                                                     cs2'_ah4n)
+                                                                                    v_ah4d)
+                                                                                   a_ah51)))
+                                                                    dbs_ah4m)
+                                                                   mempty)
+                                                                  a_ah4b))
+                                                       da_ah4c)
+                                                      mempty))
+                  in ((func_ah48 cs_ah3Z) a_ah3W) c_ah47)))
+-}

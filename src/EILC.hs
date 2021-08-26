@@ -1066,48 +1066,31 @@ iterTrC proxy h das0 cs0 = CodeC $ \(k :: (Code (Delta b), Conn PackedCode cs) -
                   mkApp @cs @r [|| cont (acc <> $$dbs1) ||] cs')
     in $$(mkApp [|| foldrDelta f (\acc -> $$(mkAbs proxy $ \cs -> k ([|| acc ||], cs))) $$das0  mempty ||] cs0)
    ||]
-  -- [||
-  --     let f da = Endo $ \cont acc -> $$(mkAbs proxy $ \cs ->
-  --           runCodeC (h [|| da ||] cs) $ \(dbs1, cs') ->
-  --             mkApp @cs @r [|| cont ($$dbs1 <> acc) ||] cs')
-  --     in $$(mkApp [|| appEndo (monoidMap f $$das0) (\acc -> $$(mkAbs proxy $ \cs -> k ([|| acc ||], cs))) mempty  ||] cs0)
-  --  ||]
---    [|| let
---         -- iter :: Func cs (Delta b -> Delta a -> (Func cs (Delta b -> r)) -> r)
---         iter acc das =
---           $$(mkAbs proxy $ \cs ->
---                     [|| case das of
---                             []        -> $$(k ([|| acc ||], cs))
---                             da : rest ->
---                                 $$(runCodeC (h [|| da ||] cs) $ \(dbs1 :: Code (Delta b), cs') ->
---                                       [|| $$(mkApp [|| iter (acc <> $$dbs1) rest ||] cs') ||])
---                      ||] )
---       in $$(mkApp [|| iter mempty $$das0 ||] cs0)
--- --           $$(mkAbs proxy $ \cs -> [|| \acc -> $$(k ([|| acc ||], cs)) ||])
---    ||]
 
+-- ifqAFromStateless :: (Code a -> Code b) -> (Code (Delta a) -> Code (Delta b)) -> IFqA a b
+-- ifqAFromStateless f df =
+--   IFqA CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df [|| injMonoid $$da ||]) ; return (v, CNone) })
 
-ifqAFromStateless :: (Code a -> Code b) -> (Code (Delta a) -> Code (Delta b)) -> IFqA a b
-ifqAFromStateless f df =
-  IFqA CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df [|| injMonoid $$da ||]) ; return (v, CNone) })
+-- ifqAFromD :: Diff a => (Code a -> Code b) -> (Code a -> Code (Delta a) -> Code (Delta b)) -> IFqA a b
+-- ifqAFromD f df =
+--   IFqA
+--     (CNE (COne Proxy))
+--     (\a -> do { v <- mkLet (f a) ; return (v, CNE (COne (PackedCode a))) })
+--     (\da (CNE (COne (PackedCode a))) -> do { v <- mkLet (df a [|| injMonoid $$da ||]) ; a' <- mkLet [|| applyAtomicDelta $$a $$da ||] ; return (v, CNE (COne (PackedCode a'))) })
 
-ifqAFromD :: Diff a => (Code a -> Code b) -> (Code a -> Code (Delta a) -> Code (Delta b)) -> IFqA a b
-ifqAFromD f df =
-  IFqA
-    (CNE (COne Proxy))
-    (\a -> do { v <- mkLet (f a) ; return (v, CNE (COne (PackedCode a))) })
-    (\da (CNE (COne (PackedCode a))) -> do { v <- mkLet (df a [|| injMonoid $$da ||]) ; a' <- mkLet [|| applyAtomicDelta $$a $$da ||] ; return (v, CNE (COne (PackedCode a'))) })
-
-ifqAFromFunctions :: Code (a -> (b, c)) -> Code (Delta a -> c -> (Delta b, c)) -> IFqA a b
-ifqAFromFunctions f df =
-  IFqA (CNE (COne Proxy))
-       (\a -> CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))) ) ||])
-       (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
-        [|| let (db, c') = $$df (injMonoid $$da) $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
+-- ifqAFromFunctions :: Code (a -> (b, c)) -> Code (Delta a -> c -> (Delta b, c)) -> IFqA a b
+-- ifqAFromFunctions f df =
+--   IFqA (CNE (COne Proxy))
+--        (\a -> CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))) ) ||])
+--        (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
+--         [|| let (db, c') = $$df (injMonoid $$da) $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
 
 ifqAFromStatelessA :: (Code a -> Code b) -> (Code (AtomicDelta a) -> Code (Delta b)) -> IFqA a b
 ifqAFromStatelessA f df =
   IFqA CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df da) ; return (v, CNone) })
+
+ifqFromStatelessA :: (Code a -> Code b) -> (Code (AtomicDelta a) -> Code (Delta b)) -> IFq a b
+ifqFromStatelessA f df = ifqa2ifq $ ifqAFromStatelessA f df
 
 ifqAFromAD :: Diff a => (Code a -> Code b) -> (Code a -> Code (AtomicDelta a) -> Code (Delta b)) -> IFqA a b
 ifqAFromAD f df =
@@ -1116,12 +1099,19 @@ ifqAFromAD f df =
     (\a -> do { v <- mkLet (f a) ; return (v, CNE (COne (PackedCode a))) })
     (\da (CNE (COne (PackedCode a))) -> do { v <- mkLet (df a da) ; a' <- mkLet [|| applyAtomicDelta $$a $$da ||] ; return (v, CNE (COne (PackedCode a'))) })
 
+ifqFromAD :: Diff a => (Code a -> Code b) -> (Code a -> Code (AtomicDelta a) -> Code (Delta b)) -> IFq a b
+ifqFromAD f df = ifqa2ifq $ ifqAFromAD f df
+
+
 ifqAFromFunctionsA :: Code (a -> (b, c)) -> Code (AtomicDelta a -> c -> (Delta b, c)) -> IFqA a b
 ifqAFromFunctionsA f df =
   IFqA (CNE (COne Proxy))
        (\a -> CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))) ) ||])
        (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
         [|| let (db, c') = $$df $$da $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
+
+ifqFromFunctionsA :: Code (a -> (b, c)) -> Code (AtomicDelta a -> c -> (Delta b, c)) -> IFq a b
+ifqFromFunctionsA f df = ifqa2ifq $ ifqAFromFunctionsA f df
 
 
 instance CategoryK IFqA where
@@ -1144,624 +1134,179 @@ instance CategoryK IFqA where
 ifqa2ifq :: IFqA a b -> IFq a b
 ifqa2ifq (IFqA sh f tr) = IFq sh f (iterTrC sh tr)
 
-runIFqA :: IFqA a b -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
-runIFqA = runIFq . ifqa2ifq
+
+-- runIFqA :: IFqA a b -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
+-- runIFqA = runIFq . ifqa2ifq
 
 
-data PackedCodeAtomicDelta a where
-  PackedCodeAtomicDelta :: Diff a => Code (AtomicDelta a) -> PackedCodeAtomicDelta a
+-- data PackedCodeAtomicDelta a where
+--   PackedCodeAtomicDelta :: Diff a => Code (AtomicDelta a) -> PackedCodeAtomicDelta a
 
-mkUpdateEnv :: Index PackedCodeAtomicDelta as -> Env PackedCode as -> CodeC (Env PackedCode as)
-mkUpdateEnv (IndexZ (PackedCodeAtomicDelta da)) (ECons (PackedCode a) as) = do
-  a' <- mkLet [|| applyAtomicDelta $$a $$da ||]
-  return (ECons (PackedCode a') as)
-mkUpdateEnv (IndexS ix) (ECons a as) = do
-  as' <- mkUpdateEnv ix as
-  return $ ECons a as'
-
-
-
-data IFqAT as b =
-  forall cs. IFqAT (Env Proxy as)
-                   (Conn Proxy cs)
-                   (Env PackedCode as -> CodeC (Code b, Conn PackedCode cs))
-                   (Index PackedCodeAtomicDelta as -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
-
-
-instance HasProduct IFqA where
-  type Unit IFqA = ()
-  type Prod IFqA a b = (a, b)
-
-  unitOk _ = Wit
-  prodOk _ _ _ = Wit
-
-instance Term IFqA IFqAT where
-  mapTerm (IFqA sh2 f2 tr2) (IFqAT tenv sh1 f1 tr1) = IFqAT tenv (joinConn sh1 sh2) f tr
-    where
-      f a = do
-        (b, c1) <- f1 a
-        (c, c2) <- f2 b
-        return (c, joinConn c1 c2)
-
-      tr da cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
-        (db, c1') <- tr1 da c1
-        (dc, c2') <- iterTrC sh2 tr2 db c2
-        return (dc, joinConn c1' c2')
-
-  multTerm (IFqAT tenv sh1 f1 tr1) (IFqAT _ sh2 f2 tr2) = IFqAT tenv (joinConn sh1 sh2) f tr
-    where
-      f s = do
-        (a, c1) <- f1 s
-        (b, c2) <- f2 s
-        r <- mkLet [|| ($$a, $$b) ||]
-        return (r , joinConn c1 c2)
-
-      tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
-        (da, c1') <- tr1 ds c1
-        (db, c2') <- tr2 ds c2
-        r <- mkLet [|| pairDelta $$da $$db ||]
-        return ( r, joinConn c1' c2' )
-
-  unitTerm tenv = IFqAT tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| mempty ||], CNone))
-
-  var0Term tenv = IFqAT (ECons Proxy tenv)
-                        CNone
-                        (\(ECons (PackedCode a) _) -> return (a, CNone))
-                        (\denv _ -> case denv of
-                            IndexZ (PackedCodeAtomicDelta da) -> return ([|| injMonoid $$da ||], CNone)
-                            _         -> return ([|| mempty ||], CNone))
---                         (\(ECons (PackedCodeDelta da) _) _ -> return (da, CNone))
-
-  weakenTerm (IFqAT tenv i f tr) = IFqAT (ECons Proxy tenv) i f' tr'
-    where
-      f'  (ECons _ s) = f s
-      tr' (IndexS ix) = tr ix
-      tr' _           = \cs -> return ([|| mempty ||],  cs)
-
-  unliftTerm (IFqAT _ i f tr) = IFqA i f' tr'
-    where
-      f'  a  = f  (ECons (PackedCode       a) ENil)
-      tr' da = tr (IndexZ (PackedCodeAtomicDelta da))
-
-
-letTermIFqAT :: Diff b1 => IFqAT as b1 -> IFqAT (b1 : as) b2 -> IFqAT as b2
-letTermIFqAT (IFqAT tenv sh1 f1 tr1) (IFqAT _ sh2 f2 tr2) = IFqAT tenv (joinConn sh1 sh2) f tr
-  where
-    f s = do
-      (a, c1) <- f1 s
-      v <- mkLet a
-      (b, c2) <- f2 (ECons (PackedCode v) s)
-      return (b, joinConn c1 c2)
-
-    tr s cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
-      (da, c1') <- tr1 s c1
-      dvs <- mkLet da
-      (db1, c2' ) <- tr2 (IndexS s) c2
-      (db2, c2'') <- iterTrC sh2 (\dv -> tr2 (IndexZ $ PackedCodeAtomicDelta dv)) dvs c2'
-      return ([|| $$db1 <> $$db2 ||], joinConn c1' c2'')
-
--- FIXME: tentative
-shareA :: forall e r1 r2. (Diff r1, App2 IFqA IFqAT e) => e r1 -> (e r1 -> e r2) -> e r2
-shareA = liftSO2 (Proxy @'[ '[], '[r1] ] ) letTermIFqAT
+-- mkUpdateEnv :: Index PackedCodeAtomicDelta as -> Env PackedCode as -> CodeC (Env PackedCode as)
+-- mkUpdateEnv (IndexZ (PackedCodeAtomicDelta da)) (ECons (PackedCode a) as) = do
+--   a' <- mkLet [|| applyAtomicDelta $$a $$da ||]
+--   return (ECons (PackedCode a') as)
+-- mkUpdateEnv (IndexS ix) (ECons a as) = do
+--   as' <- mkUpdateEnv ix as
+--   return $ ECons a as'
 
 
 
-{-
+-- data IFqAT as b =
+--   forall cs. IFqAT (Env Proxy as)
+--                    (Conn Proxy cs)
+--                    (Env PackedCode as -> CodeC (Code b, Conn PackedCode cs))
+--                    (Index PackedCodeAtomicDelta as -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
 
-To check how "share" works, compare the difference between aveDupDup and aveDupDup':
 
-*EILC EILC> let _  = $$( runIFq (runAppMono' aveDupDup') )
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-<interactive>:20:14-44: Splicing expression
-    runIFq (runAppMono' aveDupDup')
-  ======>
-    (ensureDiffType
-       $ (\ pa_alZU pb_alZV a_alZW
-            -> let v_alZX = (a_alZW, a_alZW) in
-               let
-                 v_alZY
-                   = case v_alZX of {
-                       (Bag xs_alZZ, Bag ys_am00) -> Bag (xs_alZZ ++ ys_am00) } in
-               let v_am01 = (a_alZW, a_alZW) in
-               let
-                 v_am02
-                   = case v_am01 of {
-                       (Bag xs_am03, Bag ys_am04) -> Bag (xs_am03 ++ ys_am04) } in
-               let v_am05 = (v_alZY, v_am02) in
-               let
-                 v_am06
-                   = case v_am05 of {
-                       (Bag xs_am07, Bag ys_am08) -> Bag (xs_am07 ++ ys_am08) } in
-               let v_am09 = (a_alZW, a_alZW) in
-               let
-                 v_am0a
-                   = case v_am09 of {
-                       (Bag xs_am0b, Bag ys_am0c) -> Bag (xs_am0b ++ ys_am0c) } in
-               let v_am0d = (a_alZW, a_alZW) in
-               let
-                 v_am0e
-                   = case v_am0d of {
-                       (Bag xs_am0f, Bag ys_am0g) -> Bag (xs_am0f ++ ys_am0g) } in
-               let v_am0h = (v_am0a, v_am0e) in
-               let
-                 v_am0i
-                   = case v_am0h of {
-                       (Bag xs_am0j, Bag ys_am0k) -> Bag (xs_am0j ++ ys_am0k) } in
-               let v_am0l = (v_am06, v_am0i) in
-               let
-                 v_am0m
-                   = case v_am0l of {
-                       (Bag xs_am0n, Bag ys_am0o) -> Bag (xs_am0n ++ ys_am0o) } in
-               let v_am0p = (a_alZW, a_alZW) in
-               let
-                 v_am0q
-                   = case v_am0p of {
-                       (Bag xs_am0r, Bag ys_am0s) -> Bag (xs_am0r ++ ys_am0s) } in
-               let v_am0t = (a_alZW, a_alZW) in
-               let
-                 v_am0u
-                   = case v_am0t of {
-                       (Bag xs_am0v, Bag ys_am0w) -> Bag (xs_am0v ++ ys_am0w) } in
-               let v_am0x = (v_am0q, v_am0u) in
-               let
-                 v_am0y
-                   = case v_am0x of {
-                       (Bag xs_am0z, Bag ys_am0A) -> Bag (xs_am0z ++ ys_am0A) } in
-               let v_am0B = (a_alZW, a_alZW) in
-               let
-                 v_am0C
-                   = case v_am0B of {
-                       (Bag xs_am0D, Bag ys_am0E) -> Bag (xs_am0D ++ ys_am0E) } in
-               let v_am0F = (a_alZW, a_alZW) in
-               let
-                 v_am0G
-                   = case v_am0F of {
-                       (Bag xs_am0H, Bag ys_am0I) -> Bag (xs_am0H ++ ys_am0I) } in
-               let v_am0J = (v_am0C, v_am0G) in
-               let
-                 v_am0K
-                   = case v_am0J of {
-                       (Bag xs_am0L, Bag ys_am0M) -> Bag (xs_am0L ++ ys_am0M) } in
-               let v_am0N = (v_am0y, v_am0K) in
-               let
-                 v_am0O
-                   = case v_am0N of {
-                       (Bag xs_am0P, Bag ys_am0Q) -> Bag (xs_am0P ++ ys_am0Q) } in
-               let v_am0R = (v_am0m, v_am0O) in
-               let
-                 v_am0S
-                   = case v_am0R of {
-                       (Bag xs_am0T, Bag ys_am0U) -> Bag (xs_am0T ++ ys_am0U) } in
-               let v_am0V = case v_am0S of { Bag as_am0W -> sum as_am0W } in
-               let v_am0X = (a_alZW, a_alZW) in
-               let
-                 v_am0Y
-                   = case v_am0X of {
-                       (Bag xs_am0Z, Bag ys_am10) -> Bag (xs_am0Z ++ ys_am10) } in
-               let v_am11 = (a_alZW, a_alZW) in
-               let
-                 v_am12
-                   = case v_am11 of {
-                       (Bag xs_am13, Bag ys_am14) -> Bag (xs_am13 ++ ys_am14) } in
-               let v_am15 = (v_am0Y, v_am12) in
-               let
-                 v_am16
-                   = case v_am15 of {
-                       (Bag xs_am17, Bag ys_am18) -> Bag (xs_am17 ++ ys_am18) } in
-               let v_am19 = (a_alZW, a_alZW) in
-               let
-                 v_am1a
-                   = case v_am19 of {
-                       (Bag xs_am1b, Bag ys_am1c) -> Bag (xs_am1b ++ ys_am1c) } in
-               let v_am1d = (a_alZW, a_alZW) in
-               let
-                 v_am1e
-                   = case v_am1d of {
-                       (Bag xs_am1f, Bag ys_am1g) -> Bag (xs_am1f ++ ys_am1g) } in
-               let v_am1h = (v_am1a, v_am1e) in
-               let
-                 v_am1i
-                   = case v_am1h of {
-                       (Bag xs_am1j, Bag ys_am1k) -> Bag (xs_am1j ++ ys_am1k) } in
-               let v_am1l = (v_am16, v_am1i) in
-               let
-                 v_am1m
-                   = case v_am1l of {
-                       (Bag xs_am1n, Bag ys_am1o) -> Bag (xs_am1n ++ ys_am1o) } in
-               let v_am1p = (a_alZW, a_alZW) in
-               let
-                 v_am1q
-                   = case v_am1p of {
-                       (Bag xs_am1r, Bag ys_am1s) -> Bag (xs_am1r ++ ys_am1s) } in
-               let v_am1t = (a_alZW, a_alZW) in
-               let
-                 v_am1u
-                   = case v_am1t of {
-                       (Bag xs_am1v, Bag ys_am1w) -> Bag (xs_am1v ++ ys_am1w) } in
-               let v_am1x = (v_am1q, v_am1u) in
-               let
-                 v_am1y
-                   = case v_am1x of {
-                       (Bag xs_am1z, Bag ys_am1A) -> Bag (xs_am1z ++ ys_am1A) } in
-               let v_am1B = (a_alZW, a_alZW) in
-               let
-                 v_am1C
-                   = case v_am1B of {
-                       (Bag xs_am1D, Bag ys_am1E) -> Bag (xs_am1D ++ ys_am1E) } in
-               let v_am1F = (a_alZW, a_alZW) in
-               let
-                 v_am1G
-                   = case v_am1F of {
-                       (Bag xs_am1H, Bag ys_am1I) -> Bag (xs_am1H ++ ys_am1I) } in
-               let v_am1J = (v_am1C, v_am1G) in
-               let
-                 v_am1K
-                   = case v_am1J of {
-                       (Bag xs_am1L, Bag ys_am1M) -> Bag (xs_am1L ++ ys_am1M) } in
-               let v_am1N = (v_am1y, v_am1K) in
-               let
-                 v_am1O
-                   = case v_am1N of {
-                       (Bag xs_am1P, Bag ys_am1Q) -> Bag (xs_am1P ++ ys_am1Q) } in
-               let v_am1R = (v_am1m, v_am1O) in
-               let
-                 v_am1S
-                   = case v_am1R of {
-                       (Bag xs_am1T, Bag ys_am1U) -> Bag (xs_am1T ++ ys_am1U) } in
-               let v_am1V = case v_am1S of { Bag as_am1W -> length as_am1W } in
-               let v_am1X = fromIntegral v_am1V :: Double in
-               let v_am1Y = (v_am0V, v_am1X) in
-               let v_am1Z = (uncurry (/)) v_am1Y
-               in
-                 (v_am1Z,
-                  let
-                    func_am20
-                      = \ a_am21
-                          -> ((mkInteraction pa_alZU) pb_alZV
-                                $ (\ da_am22
-                                     -> let v_am23 = (da_am22, da_am22) in
-                                        let
-                                          v_am24
-                                            = case v_am23 of {
-                                                (Bag dx_am25, Bag dy_am26)
-                                                  -> Bag (dx_am25 ++ dy_am26) } in
-                                        let v_am27 = (da_am22, da_am22) in
-                                        let
-                                          v_am28
-                                            = case v_am27 of {
-                                                (Bag dx_am29, Bag dy_am2a)
-                                                  -> Bag (dx_am29 ++ dy_am2a) } in
-                                        let v_am2b = (v_am24, v_am28) in
-                                        let
-                                          v_am2c
-                                            = case v_am2b of {
-                                                (Bag dx_am2d, Bag dy_am2e)
-                                                  -> Bag (dx_am2d ++ dy_am2e) } in
-                                        let v_am2f = (da_am22, da_am22) in
-                                        let
-                                          v_am2g
-                                            = case v_am2f of {
-                                                (Bag dx_am2h, Bag dy_am2i)
-                                                  -> Bag (dx_am2h ++ dy_am2i) } in
-                                        let v_am2j = (da_am22, da_am22) in
-                                        let
-                                          v_am2k
-                                            = case v_am2j of {
-                                                (Bag dx_am2l, Bag dy_am2m)
-                                                  -> Bag (dx_am2l ++ dy_am2m) } in
-                                        let v_am2n = (v_am2g, v_am2k) in
-                                        let
-                                          v_am2o
-                                            = case v_am2n of {
-                                                (Bag dx_am2p, Bag dy_am2q)
-                                                  -> Bag (dx_am2p ++ dy_am2q) } in
-                                        let v_am2r = (v_am2c, v_am2o) in
-                                        let
-                                          v_am2s
-                                            = case v_am2r of {
-                                                (Bag dx_am2t, Bag dy_am2u)
-                                                  -> Bag (dx_am2t ++ dy_am2u) } in
-                                        let v_am2v = (da_am22, da_am22) in
-                                        let
-                                          v_am2w
-                                            = case v_am2v of {
-                                                (Bag dx_am2x, Bag dy_am2y)
-                                                  -> Bag (dx_am2x ++ dy_am2y) } in
-                                        let v_am2z = (da_am22, da_am22) in
-                                        let
-                                          v_am2A
-                                            = case v_am2z of {
-                                                (Bag dx_am2B, Bag dy_am2C)
-                                                  -> Bag (dx_am2B ++ dy_am2C) } in
-                                        let v_am2D = (v_am2w, v_am2A) in
-                                        let
-                                          v_am2E
-                                            = case v_am2D of {
-                                                (Bag dx_am2F, Bag dy_am2G)
-                                                  -> Bag (dx_am2F ++ dy_am2G) } in
-                                        let v_am2H = (da_am22, da_am22) in
-                                        let
-                                          v_am2I
-                                            = case v_am2H of {
-                                                (Bag dx_am2J, Bag dy_am2K)
-                                                  -> Bag (dx_am2J ++ dy_am2K) } in
-                                        let v_am2L = (da_am22, da_am22) in
-                                        let
-                                          v_am2M
-                                            = case v_am2L of {
-                                                (Bag dx_am2N, Bag dy_am2O)
-                                                  -> Bag (dx_am2N ++ dy_am2O) } in
-                                        let v_am2P = (v_am2I, v_am2M) in
-                                        let
-                                          v_am2Q
-                                            = case v_am2P of {
-                                                (Bag dx_am2R, Bag dy_am2S)
-                                                  -> Bag (dx_am2R ++ dy_am2S) } in
-                                        let v_am2T = (v_am2E, v_am2Q) in
-                                        let
-                                          v_am2U
-                                            = case v_am2T of {
-                                                (Bag dx_am2V, Bag dy_am2W)
-                                                  -> Bag (dx_am2V ++ dy_am2W) } in
-                                        let v_am2X = (v_am2s, v_am2U) in
-                                        let
-                                          v_am2Y
-                                            = case v_am2X of {
-                                                (Bag dx_am2Z, Bag dy_am30)
-                                                  -> Bag (dx_am2Z ++ dy_am30) } in
-                                        let
-                                          v_am31
-                                            = case v_am2Y of {
-                                                Bag as'_am32 -> Sum (sum as'_am32) } in
-                                        let v_am33 = (da_am22, da_am22) in
-                                        let
-                                          v_am34
-                                            = case v_am33 of {
-                                                (Bag dx_am35, Bag dy_am36)
-                                                  -> Bag (dx_am35 ++ dy_am36) } in
-                                        let v_am37 = (da_am22, da_am22) in
-                                        let
-                                          v_am38
-                                            = case v_am37 of {
-                                                (Bag dx_am39, Bag dy_am3a)
-                                                  -> Bag (dx_am39 ++ dy_am3a) } in
-                                        let v_am3b = (v_am34, v_am38) in
-                                        let
-                                          v_am3c
-                                            = case v_am3b of {
-                                                (Bag dx_am3d, Bag dy_am3e)
-                                                  -> Bag (dx_am3d ++ dy_am3e) } in
-                                        let v_am3f = (da_am22, da_am22) in
-                                        let
-                                          v_am3g
-                                            = case v_am3f of {
-                                                (Bag dx_am3h, Bag dy_am3i)
-                                                  -> Bag (dx_am3h ++ dy_am3i) } in
-                                        let v_am3j = (da_am22, da_am22) in
-                                        let
-                                          v_am3k
-                                            = case v_am3j of {
-                                                (Bag dx_am3l, Bag dy_am3m)
-                                                  -> Bag (dx_am3l ++ dy_am3m) } in
-                                        let v_am3n = (v_am3g, v_am3k) in
-                                        let
-                                          v_am3o
-                                            = case v_am3n of {
-                                                (Bag dx_am3p, Bag dy_am3q)
-                                                  -> Bag (dx_am3p ++ dy_am3q) } in
-                                        let v_am3r = (v_am3c, v_am3o) in
-                                        let
-                                          v_am3s
-                                            = case v_am3r of {
-                                                (Bag dx_am3t, Bag dy_am3u)
-                                                  -> Bag (dx_am3t ++ dy_am3u) } in
-                                        let v_am3v = (da_am22, da_am22) in
-                                        let
-                                          v_am3w
-                                            = case v_am3v of {
-                                                (Bag dx_am3x, Bag dy_am3y)
-                                                  -> Bag (dx_am3x ++ dy_am3y) } in
-                                        let v_am3z = (da_am22, da_am22) in
-                                        let
-                                          v_am3A
-                                            = case v_am3z of {
-                                                (Bag dx_am3B, Bag dy_am3C)
-                                                  -> Bag (dx_am3B ++ dy_am3C) } in
-                                        let v_am3D = (v_am3w, v_am3A) in
-                                        let
-                                          v_am3E
-                                            = case v_am3D of {
-                                                (Bag dx_am3F, Bag dy_am3G)
-                                                  -> Bag (dx_am3F ++ dy_am3G) } in
-                                        let v_am3H = (da_am22, da_am22) in
-                                        let
-                                          v_am3I
-                                            = case v_am3H of {
-                                                (Bag dx_am3J, Bag dy_am3K)
-                                                  -> Bag (dx_am3J ++ dy_am3K) } in
-                                        let v_am3L = (da_am22, da_am22) in
-                                        let
-                                          v_am3M
-                                            = case v_am3L of {
-                                                (Bag dx_am3N, Bag dy_am3O)
-                                                  -> Bag (dx_am3N ++ dy_am3O) } in
-                                        let v_am3P = (v_am3I, v_am3M) in
-                                        let
-                                          v_am3Q
-                                            = case v_am3P of {
-                                                (Bag dx_am3R, Bag dy_am3S)
-                                                  -> Bag (dx_am3R ++ dy_am3S) } in
-                                        let v_am3T = (v_am3E, v_am3Q) in
-                                        let
-                                          v_am3U
-                                            = case v_am3T of {
-                                                (Bag dx_am3V, Bag dy_am3W)
-                                                  -> Bag (dx_am3V ++ dy_am3W) } in
-                                        let v_am3X = (v_am3s, v_am3U) in
-                                        let
-                                          v_am3Y
-                                            = case v_am3X of {
-                                                (Bag dx_am3Z, Bag dy_am40)
-                                                  -> Bag (dx_am3Z ++ dy_am40) } in
-                                        let
-                                          v_am41
-                                            = case v_am3Y of {
-                                                Bag as_am42 -> Sum (length as_am42) } in
-                                        let v_am43 = Sum (fromIntegral (getSum v_am41) :: Double) in
-                                        let v_am44 = (v_am31, v_am43) in
-                                        let
-                                          v_am45
-                                            = let
-                                                (x_am48, y_am49) = a_am21
-                                                (dx_am46, dy_am47) = v_am44
-                                              in
-                                                (Sum
-                                                   $ (((x_am48 /+ dx_am46) / (y_am49 /+ dy_am47))
-                                                        - (x_am48 / y_am49))) in
-                                        let v_am4a = (a_am21 /+ v_am44)
-                                        in (v_am45, func_am20 v_am4a)))
-                  in func_am20 v_am1Y)))
+-- instance HasProduct IFqA where
+--   type Unit IFqA = ()
+--   type Prod IFqA a b = (a, b)
 
-*EILC EILC> let _  = $$( runIFq (runAppMono' aveDupDup) )
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 1 and #tenv2 = 1
-Diff: #tenv1 = 2 and #tenv2 = 2
-Diff: #tenv1 = 2 and #tenv2 = 2
-Diff: #tenv1 = 3 and #tenv2 = 3
-Diff: #tenv1 = 3 and #tenv2 = 3
-Diff: #tenv1 = 4 and #tenv2 = 4
-Diff: #tenv1 = 4 and #tenv2 = 4
-Diff: #tenv1 = 5 and #tenv2 = 5
-Diff: #tenv1 = 5 and #tenv2 = 5
-<interactive>:21:14-43: Splicing expression
-    runIFq (runAppMono' aveDupDup)
-  ======>
-    (ensureDiffType
-       $ (\ pa_amIw pb_amIx a_amIy
-            -> let v_amIz = (a_amIy, a_amIy) in
-               let
-                 v_amIA
-                   = case v_amIz of {
-                       (Bag xs_amIB, Bag ys_amIC) -> Bag (xs_amIB ++ ys_amIC) } in
-               let v_amID = v_amIA in
-               let v_amIE = (v_amID, v_amID) in
-               let
-                 v_amIF
-                   = case v_amIE of {
-                       (Bag xs_amIG, Bag ys_amIH) -> Bag (xs_amIG ++ ys_amIH) } in
-               let v_amII = v_amIF in
-               let v_amIJ = (v_amII, v_amII) in
-               let
-                 v_amIK
-                   = case v_amIJ of {
-                       (Bag xs_amIL, Bag ys_amIM) -> Bag (xs_amIL ++ ys_amIM) } in
-               let v_amIN = v_amIK in
-               let v_amIO = (v_amIN, v_amIN) in
-               let
-                 v_amIP
-                   = case v_amIO of {
-                       (Bag xs_amIQ, Bag ys_amIR) -> Bag (xs_amIQ ++ ys_amIR) } in
-               let v_amIS = v_amIP in
-               let v_amIT = case v_amIS of { Bag as_amIU -> sum as_amIU } in
-               let v_amIV = case v_amIS of { Bag as_amIW -> length as_amIW } in
-               let v_amIX = fromIntegral v_amIV :: Double in
-               let v_amIY = (v_amIT, v_amIX) in
-               let v_amIZ = (uncurry (/)) v_amIY
-               in
-                 (v_amIZ,
-                  let
-                    func_amJ0
-                      = \ a_amJ1
-                          -> ((mkInteraction pa_amIw) pb_amIx
-                                $ (\ da_amJ2
-                                     -> let v_amJ3 = (da_amJ2, da_amJ2) in
-                                        let
-                                          v_amJ4
-                                            = case v_amJ3 of {
-                                                (Bag dx_amJ5, Bag dy_amJ6)
-                                                  -> Bag (dx_amJ5 ++ dy_amJ6) } in
-                                        let v_amJ7 = v_amJ4 in
-                                        let v_amJ8 = (v_amJ7, v_amJ7) in
-                                        let
-                                          v_amJ9
-                                            = case v_amJ8 of {
-                                                (Bag dx_amJa, Bag dy_amJb)
-                                                  -> Bag (dx_amJa ++ dy_amJb) } in
-                                        let v_amJc = v_amJ9 in
-                                        let v_amJd = (v_amJc, v_amJc) in
-                                        let
-                                          v_amJe
-                                            = case v_amJd of {
-                                                (Bag dx_amJf, Bag dy_amJg)
-                                                  -> Bag (dx_amJf ++ dy_amJg) } in
-                                        let v_amJh = v_amJe in
-                                        let v_amJi = (v_amJh, v_amJh) in
-                                        let
-                                          v_amJj
-                                            = case v_amJi of {
-                                                (Bag dx_amJk, Bag dy_amJl)
-                                                  -> Bag (dx_amJk ++ dy_amJl) } in
-                                        let v_amJm = v_amJj in
-                                        let
-                                          v_amJn
-                                            = case v_amJm of {
-                                                Bag as'_amJo -> Sum (sum as'_amJo) } in
-                                        let
-                                          v_amJp
-                                            = case v_amJm of {
-                                                Bag as_amJq -> Sum (length as_amJq) } in
-                                        let v_amJr = Sum (fromIntegral (getSum v_amJp) :: Double) in
-                                        let v_amJs = (v_amJn, v_amJr) in
-                                        let
-                                          v_amJt
-                                            = let
-                                                (x_amJw, y_amJx) = a_amJ1
-                                                (dx_amJu, dy_amJv) = v_amJs
-                                              in
-                                                (Sum
-                                                   $ (((x_amJw /+ dx_amJu) / (y_amJx /+ dy_amJv))
-                                                        - (x_amJw / y_amJx))) in
-                                        let v_amJy = (a_amJ1 /+ v_amJs)
-                                        in (v_amJt, func_amJ0 v_amJy)))
-                  in func_amJ0 v_amIY)))
+--   unitOk _ = Wit
+--   prodOk _ _ _ = Wit
 
--}
+-- instance Term IFqA IFqAT where
+--   mapTerm (IFqA sh2 f2 tr2) (IFqAT tenv sh1 f1 tr1) = IFqAT tenv (joinConn sh1 sh2) f tr
+--     where
+--       f a = do
+--         (b, c1) <- f1 a
+--         (c, c2) <- f2 b
+--         return (c, joinConn c1 c2)
+
+--       tr da cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+--         (db, c1') <- tr1 da c1
+--         (dc, c2') <- iterTrC sh2 tr2 db c2
+--         return (dc, joinConn c1' c2')
+
+--   multTerm (IFqAT tenv sh1 f1 tr1) (IFqAT _ sh2 f2 tr2) = IFqAT tenv (joinConn sh1 sh2) f tr
+--     where
+--       f s = do
+--         (a, c1) <- f1 s
+--         (b, c2) <- f2 s
+--         r <- mkLet [|| ($$a, $$b) ||]
+--         return (r , joinConn c1 c2)
+
+--       tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+--         (da, c1') <- tr1 ds c1
+--         (db, c2') <- tr2 ds c2
+--         r <- mkLet [|| pairDelta $$da $$db ||]
+--         return ( r, joinConn c1' c2' )
+
+--   unitTerm tenv = IFqAT tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| mempty ||], CNone))
+
+--   var0Term tenv = IFqAT (ECons Proxy tenv)
+--                         CNone
+--                         (\(ECons (PackedCode a) _) -> return (a, CNone))
+--                         (\denv _ -> case denv of
+--                             IndexZ (PackedCodeAtomicDelta da) -> return ([|| injMonoid $$da ||], CNone)
+--                             _         -> return ([|| mempty ||], CNone))
+-- --                         (\(ECons (PackedCodeDelta da) _) _ -> return (da, CNone))
+
+--   weakenTerm (IFqAT tenv i f tr) = IFqAT (ECons Proxy tenv) i f' tr'
+--     where
+--       f'  (ECons _ s) = f s
+--       tr' (IndexS ix) = tr ix
+--       tr' _           = \cs -> return ([|| mempty ||],  cs)
+
+--   unliftTerm (IFqAT _ i f tr) = IFqA i f' tr'
+--     where
+--       f'  a  = f  (ECons (PackedCode       a) ENil)
+--       tr' da = tr (IndexZ (PackedCodeAtomicDelta da))
+
+
+-- letTermIFqAT :: Diff b1 => IFqAT as b1 -> IFqAT (b1 : as) b2 -> IFqAT as b2
+-- letTermIFqAT (IFqAT tenv sh1 f1 tr1) (IFqAT _ sh2 f2 tr2) = IFqAT tenv (joinConn sh1 sh2) f tr
+--   where
+--     f s = do
+--       (a, c1) <- f1 s
+--       v <- mkLet a
+--       (b, c2) <- f2 (ECons (PackedCode v) s)
+--       return (b, joinConn c1 c2)
+
+--     tr s cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+--       (da, c1') <- tr1 s c1
+--       dvs <- mkLet da
+--       (db1, c2' ) <- tr2 (IndexS s) c2
+--       (db2, c2'') <- iterTrC sh2 (\dv -> tr2 (IndexZ $ PackedCodeAtomicDelta dv)) dvs c2'
+--       return ([|| $$db1 <> $$db2 ||], joinConn c1' c2'')
+
+-- -- FIXME: tentative
+-- shareA :: forall e r1 r2. (Diff r1, App2 IFqA IFqAT e) => e r1 -> (e r1 -> e r2) -> e r2
+-- shareA = liftSO2 (Proxy @'[ '[], '[r1] ] ) letTermIFqAT
 
 
 
+-- data IFqATM as b =
+--   forall cs. IFqATM (Env Proxy as)
+--                     (Conn Proxy cs)
+--                     (Env PackedCode as -> CodeC (Code b, Conn PackedCode cs))
+--                     (Env PackedCodeAtomicDelta as -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
 
+-- instance Term IFqA IFqATM where
+--   mapTerm (IFqA sh2 f2 tr2) (IFqATM tenv sh1 f1 tr1) = IFqATM tenv (joinConn sh1 sh2) f tr
+--     where
+--       f a = do
+--         (b, c1) <- f1 a
+--         (c, c2) <- f2 b
+--         return (c, joinConn c1 c2)
 
+--       tr da cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+--         (db, c1') <- tr1 da c1
+--         (dc, c2') <- iterTrC sh2 tr2 db c2
+--         return (dc, joinConn c1' c2')
+
+--   multTerm (IFqATM tenv sh1 f1 tr1) (IFqATM _ sh2 f2 tr2) = IFqATM tenv (joinConn sh1 sh2) f tr
+--     where
+--       f s = do
+--         (a, c1) <- f1 s
+--         (b, c2) <- f2 s
+--         r <- mkLet [|| ($$a, $$b) ||]
+--         return (r , joinConn c1 c2)
+
+--       tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+--         (da, c1') <- tr1 ds c1
+--         (db, c2') <- tr2 ds c2
+--         r <- mkLet [|| pairDelta $$da $$db ||]
+--         return ( r, joinConn c1' c2' )
+
+--   unitTerm tenv = IFqATM tenv CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| mempty ||], CNone))
+
+--   var0Term tenv = IFqATM (ECons Proxy tenv)
+--                          CNone
+--                          (\(ECons (PackedCode a) _) -> return (a, CNone))
+--                          (\denv _ -> case denv of
+--                             ECons (PackedCodeAtomicDelta da) _ -> return ([|| injMonoid $$da ||], CNone))
+-- --                         (\(ECons (PackedCodeDelta da) _) _ -> return (da, CNone))
+
+--   weakenTerm (IFqATM tenv i f tr) = IFqATM (ECons Proxy tenv) i f' tr'
+--     where
+--       f'  (ECons _ s) = f s
+--       tr' (ECons _ denv) = tr denv
+
+--   unliftTerm (IFqATM _ i f tr) = IFqA i f' tr'
+--     where
+--       f'  a  = f  (ECons (PackedCode       a) ENil)
+--       tr' da = tr (ECons (PackedCodeAtomicDelta da) ENil)
+
+-- -- Given : Env PackedCodeAtomicDelta (a : as) -> cs -> CodeC (Code (Delta b), cs)
+-- -- Find : Code (Delta a) -> Env PackedCodeAtomicDelta as -> cs -> CodeC (Code (Delta b), cs)
+
+-- letTermIFqATM :: Diff b1 => IFqATM as b1 -> IFqATM (b1 : as) b2 -> IFqATM as b2
+-- letTermIFqATM (IFqATM tenv sh1 f1 tr1) (IFqATM _ sh2 f2 tr2) = IFqATM tenv (joinConn sh1 sh2) f tr
+--   where
+--     f s = do
+--       (a, c1) <- f1 s
+--       v <- mkLet a
+--       (b, c2) <- f2 (ECons (PackedCode v) s)
+--       return (b, joinConn c1 c2)
+
+--     tr s cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+--       (da, c1') <- tr1 s c1
+--       dvs <- mkLet da
+--       (db1, c2' ) <- tr2 (IndexS s) c2
+--       (db2, c2'') <- iterTrC sh2 (\dv -> tr2 (IndexZ $ PackedCodeAtomicDelta dv)) dvs c2'
+--       return ([|| $$db1 <> $$db2 ||], joinConn c1' c2'')
 
 
 
