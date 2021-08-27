@@ -44,6 +44,12 @@ mapEnvA :: Applicative k => (forall a. f a -> k (g a)) -> Env f as -> k (Env g a
 mapEnvA _ ENil         = pure ENil
 mapEnvA h (ECons x xs) = ECons <$> h x <*> mapEnvA h xs
 
+headEnv :: Env f (a ': as) -> f a
+headEnv (ECons a _) = a
+
+tailEnv :: Env f (a ': as) -> Env f as
+tailEnv (ECons _ r) = r
+
 
 
 zipWithEnv :: (forall a. f a -> g a -> h a) -> Env f as -> Env g as -> Env h as

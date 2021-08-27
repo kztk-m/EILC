@@ -16,6 +16,8 @@
 
 module Examples.Sequence where
 
+import           Prelude               hiding ((.))
+
 import           Data.Coerce           (coerce)
 import           Data.Maybe            (fromJust)
 import qualified Data.Sequence         as Seq
@@ -25,11 +27,8 @@ import           Language.Unembedding
 import           Data.Env
 import qualified Data.Foldable         (toList)
 import           Data.Functor.Identity (Identity (Identity, runIdentity))
-import           Data.List             (uncons)
-import           Data.Monoid           (Sum (getSum))
 import           Data.Sequence         (Seq)
 import           Data.Typeable         (Proxy (Proxy))
-import           Debug.Trace           (trace)
 
 import           Data.Monoid
 
@@ -88,20 +87,23 @@ rearrSeq i n j s0 =
 dsingleton :: AtomicDelta a -> Delta (S a)
 dsingleton da = injMonoid $ coerce $ SRep 0 da
 
-singletonF :: (App2 IFq IFqT e, Diff a) => e a -> e (S a)
+singletonF :: (App2 IFq t e, Diff a) => e a -> e (S a)
 singletonF = lift singletonC
   where
     singletonC =
-      ifqFromStatelessA (\a -> [|| S (Seq.singleton $$a) ||])
-                        (\da -> [|| dsingleton $$da ||])
+      ifqFromStateless (\a -> [|| S (Seq.singleton $$a) ||])
+                       (\da -> [|| iterTrStateless dsingleton $$da ||])
+      -- ifqFromStatelessA (\a -> [|| S (Seq.singleton $$a) ||])
+      --                   (\da -> [|| dsingleton $$da ||])
 
 dempty :: Delta (S a)
 dempty = mempty
 
-emptyF :: (App2 IFq IFqT e, Diff a) => e (S a)
+emptyF :: (App2 IFq t e, Diff a) => e (S a)
 emptyF = lift emptyC unit
   where
-    emptyC = ifqFromStatelessA (const [|| S Seq.empty ||]) (const [|| dempty ||])
+      emptyC = ifqFromStateless (const [|| S Seq.empty ||]) (const [|| dempty ||])
+--    emptyC = ifqFromStatelessA (const [|| S Seq.empty ||]) (const [|| dempty ||])
 
 type ConcatC = Seq.Seq Int
 
@@ -170,8 +172,9 @@ trConcatCAtomic (SRep i ds) c =
     goAtomic offset (SRearr j n k) ci =
       (injMonoid (SRearr (offset + j) n (offset + k)), ci)
 
-concatF :: (App2 IFq IFqT e, Diff a) => e (S (S a)) -> e (S a)
-concatF = lift $ ifqFromFunctionsA [|| concatC ||] [|| trConcatCAtomic ||]
+concatF :: (App2 IFq t e, Diff a) => e (S (S a)) -> e (S a)
+concatF = lift $ ifqFromFunctions [|| concatC ||] [|| iterTr trConcatCAtomic ||]
+  -- lift $ ifqFromFunctionsA [|| concatC ||] [|| trConcatCAtomic ||]
 
 
 
@@ -206,13 +209,6 @@ concatF = lift $ ifqFromFunctionsA [|| concatC ||] [|| trConcatCAtomic ||]
 --   in ([SRep i db], Seq.update i ci' cs)
 
 
-type family Flatten cs where
-  Flatten 'None   = '[]
-  Flatten ('NE x) = Flatten' x '[]
-
-type family Flatten' cs r where
-  Flatten' ('NEOne c) r = c ': r
-  Flatten' ('NEJoin cs1 cs2) r = Flatten' cs1 (Flatten' cs2 r)
 
 type family UnFlatten cs = c | c -> cs where
   UnFlatten '[]       = 'None
@@ -262,13 +258,12 @@ mapTr ::
 mapTr f dfb cs ds =
   let -- FIXME: can we avoid this step in some ways?
       (dbs1, cs') = mapTrUnchanged (dfb True mempty) cs
-      (dbs2, cs'') = iterTr (mapTrChanged f (dfb False Prelude.. pure)) ds cs'
+      (dbs2, cs'') = iterTr (mapTrChanged f (dfb False . pure)) ds cs'
   in (dbs1 <> dbs2, cs'')
-  where
 
 sequenceDelta :: Seq (Delta a) -> Delta (S a)
 sequenceDelta s =
-  mconcat $ zipWith (\i -> fmap (SRep i)) [0..] (Data.Foldable.toList s)
+  mconcat $ zipWith (fmap . SRep) [0..] (Data.Foldable.toList s)
 
 mapTrUnchanged ::
   (c -> (Delta b, c))
@@ -316,9 +311,11 @@ mapTrChanged _ _adf (SRearr i n j) cs =
 --   in ([ SRearr i n j ] <> sequenceDelta dbs , cs')
 
 
+type EncCS cs2 = Env Identity (Flatten cs2)
 type MapC s cs1 cs2 =
     cs1
-    @+ 'NE ('NEOne (Seq.Seq (Conn Identity cs2)))
+--    @+ 'NE ('NEOne (Seq.Seq (Conn Identity cs2)))
+    @+ 'NE ('NEOne (Seq (EncCS cs2)))
     @+ UnFlatten s
 
 mapT :: forall s a b. Diff a => IFqT s (S a) -> IFqT (a ': s) b -> IFqT s (S b)
@@ -330,10 +327,10 @@ mapT (IFqT tenv (sh1 :: Conn Proxy cs1) f1 tr1)
     sh :: Conn Proxy (MapC s cs1 cs2)
     sh = joinConn sh1 shMap
 
-    shMap :: Conn Proxy ('NE ('NEOne (Seq.Seq (Conn Identity cs2))) @+ UnFlatten s)
+    shMap :: Conn Proxy ('NE ('NEOne (Seq.Seq (EncCS cs2))) @+ UnFlatten s)
     shMap = joinConn shA (convertEnv tenv)
 
-    shA :: Conn Proxy ('NE ('NEOne (Seq.Seq (Conn Identity cs2))))
+    shA :: Conn Proxy ('NE ('NEOne (Seq.Seq (EncCS cs2))))
     shA = CNE (COne Proxy)
 
 
@@ -349,17 +346,17 @@ mapT (IFqT tenv (sh1 :: Conn Proxy cs1) f1 tr1)
         ||]
       return (bs, joinConn c (joinConn cs (convertEnv env)))
 
-    h :: Env PackedCode s -> Code (a -> (b, Conn Identity cs2))
+    h :: Env PackedCode s -> Code (a -> (b, EncCS cs2))
     h env = [||
-        \a -> $$( runCodeC (f2 (ECons (PackedCode [|| a ||]) env)) $ \(b, c') -> [|| ($$b, $$(conn2code c')) ||])
+        \a -> $$( runCodeC (f2 (ECons (PackedCode [|| a ||]) env)) $ \(b, c') -> [|| ($$b, $$(conn2cenv c')) ||])
       ||]
 
-    trh :: Env PackedCodeDelta s -> Conn Proxy cs2 -> Code (Bool -> Delta a -> Conn Identity cs2 -> (Delta b, Conn Identity cs2))
+    trh :: Env PackedCodeDelta s -> Conn Proxy cs2 -> Code (Bool -> Delta a -> EncCS cs2 -> (Delta b, EncCS cs2))
     trh env pcs = [|| \b da c ->
-      $$(code2conn pcs [|| c ||] $ \cs ->
+      $$(cenv2conn pcs [|| c ||] $ \cs ->
         let env' = mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) env
         in runCodeC (tr2 (ECons (PackedCodeDelta [|| da ||]) env') cs) $ \(db, cs') ->
-          [|| ($$db, $$(conn2code cs') ) ||])
+          [|| ($$db, $$(conn2cenv cs') ) ||])
       ||]
 
     -- trh :: Env PackedCodeDelta s -> Conn Proxy cs2 -> Code (Delta a -> Conn Identity cs2 -> (Delta b , Conn Identity cs2))
@@ -407,9 +404,6 @@ mapT (IFqT tenv (sh1 :: Conn Proxy cs1) f1 tr1)
     --   $$(code2conn pcs [|| c ||] $ \cs -> toCode $ do
     --     (db, cs') <- iterTrC pcs tr2 (
 
-    mkLetEnv :: Env PackedCode aa -> CodeC (Env PackedCode aa)
-    mkLetEnv = mapEnvA (\(PackedCode c) -> PackedCode <$> mkLet c)
-
 
     tr :: Env PackedCodeDelta s
          -> Conn PackedCode (MapC s cs1 cs2)
@@ -436,14 +430,87 @@ mapT (IFqT tenv (sh1 :: Conn Proxy cs1) f1 tr1)
           -- FIXME: potential source of slow down.
           return ([|| $$dbs ||], joinConn c1' (joinConn (CNE $ COne $ PackedCode cs2') (convertEnv env')))
 
+mkLetEnv :: Env PackedCode aa -> CodeC (Env PackedCode aa)
+mkLetEnv = mapEnvA (\(PackedCode c) -> PackedCode <$> mkLet c)
+
+
+type MapCE a cs1 cs2 =
+    cs1
+--    @+ 'NE ('NEOne (Seq.Seq (Conn Identity cs2)))
+    @+ 'NE ('NEOne (Seq (a, EncCS cs2)))
+
+trackInputInC :: (a -> (b, c)) -> (a -> (b, (a, c)))
+trackInputInC f a = let (b, c) = f a in (b, (a, c))
+
+
+mapTE :: forall s a b. Diff a => IFqTE s (S a) -> IFqTE (a ': s) b -> IFqTE s (S b)
+mapTE (IFqTE tenv (sh1 :: Conn Proxy cs1) f1 tr1)
+      (IFqTE _    (sh2 :: Conn Proxy cs2) f2 tr2) =
+    IFqTE @s @(S b) @(MapCE a cs1 cs2) tenv sh f tr
+  where
+    sh :: Conn Proxy (MapCE a cs1 cs2)
+    sh = joinConn sh1 shMap
+
+    shMap :: Conn Proxy ('NE ('NEOne (Seq (a, EncCS cs2))))
+    shMap = CNE (COne (Proxy @(Seq (a, EncCS cs2))))
+
+    h :: Env PackedCode s -> Code (a -> (b, EncCS cs2))
+    h env = [||
+        \a -> $$( runCodeC (f2 (ECons (PackedCode [|| a ||]) env)) $ \(b, c') -> [|| ($$b, $$(conn2cenv c')) ||])
+      ||]
+
+    f ::
+      Env PackedCode s
+      -> CodeC (Code (S b), Conn PackedCode (MapCE a cs1 cs2))
+    f env = do
+      (as, c)  <- f1 env
+      (bs, cs) <- CodeC $ \k -> [||
+          let (bs, cs) = Seq.unzip $ fmap (trackInputInC $$(h env)) (unS $$as)
+          in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||]))
+        ||]
+      return (bs, joinConn c cs)
+
+    trh :: Env PackedCode s -> Env PackedCodeDelta s -> Conn Proxy cs2 -> Code (Bool -> Delta a -> (a, EncCS cs2) -> (Delta b, (a, EncCS cs2)))
+    trh env denv pcs = [|| \b da (a, c) ->
+      $$(cenv2conn pcs [|| c ||] $ \cs ->
+        let denv' = mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
+        in runCodeC (tr2 (ECons (PackedCode [|| a ||]) env) (ECons (PackedCodeDelta [|| da ||]) denv') cs) $ \(db, cs') ->
+          [|| ($$db, (a /+ da, $$(conn2cenv cs') )) ||])
+      ||]
+
+    tr :: Env PackedCode s -> Env PackedCodeDelta s
+         -> Conn PackedCode (MapCE a cs1 cs2)
+         -> CodeC (Code (Delta (S b)), Conn PackedCode (MapCE a cs1 cs2))
+    tr env denv conn | (c1, c2) <- decompConn (isNone sh1) (isNone shMap) conn =
+      case c2 of
+        CNE (COne (PackedCode cs2)) -> do
+          -- FIXME: This is a source of potential slow down.
+          env' <- mkLetEnv $ zipWithEnv (\(PackedCode a) (PackedCodeDelta da) -> PackedCode [|| $$a /+ $$da ||]) env denv
+
+          (das, c1') <- tr1 env denv c1
+          (dbs, cs2') <- CodeC $ \k -> [||
+              let fElem  = trackInputInC $$(h env')
+                  trElem = $$(trh env denv sh2)
+                  (dbs, cs2') = mapTr fElem trElem $$cs2 $$das
+              in $$(k ([|| dbs ||], [|| cs2' ||]))
+            ||]
+
+          -- FIXME: potential source of slow down.
+          return ([|| $$dbs ||], joinConn c1' (CNE $ COne $ PackedCode cs2'))
+
+
+
 mapF :: forall e a b. (App2 IFq IFqT e, Diff a) => (e a -> e b) -> e (S a) -> e (S b)
 mapF = flip (liftSO2 (Proxy @'[ '[], '[a] ]) mapT)
 
-fstF :: (App2 IFq IFqT e, Diff a, Diff b) => e (a, b) -> e a
-fstF = lift $ ifqFromStatelessA (\a -> [|| fst $$a ||]) (\dz -> [|| fstDeltaA $$dz||])
+mapFE :: forall e a b. (App2 IFq IFqTE e, Diff a) => (e a -> e b) -> e (S a) -> e (S b)
+mapFE = flip (liftSO2 (Proxy @'[ '[], '[a] ]) mapTE)
 
-sndF :: (App2 IFq IFqT e, Diff a, Diff b) => e (a, b) -> e b
-sndF = lift $ ifqFromStatelessA (\a -> [|| snd $$a ||]) (\dz -> [|| sndDeltaA $$dz ||])
+fstF :: (App2 IFq t e, Diff a, Diff b) => e (a, b) -> e a
+fstF = lift $ ifqFromStateless (\a -> [|| fst $$a ||]) (\dz -> [|| iterTrStateless fstDeltaA $$dz||])
+
+sndF :: (App2 IFq t e, Diff a, Diff b) => e (a, b) -> e b
+sndF = lift $ ifqFromStateless (\a -> [|| snd $$a ||]) (\dz -> [|| iterTrStateless sndDeltaA $$dz ||])
 
 
 
@@ -452,6 +519,13 @@ cartesian as bs =
   concatMapF (\a -> mapF (pair a) bs) as
   where
     concatMapF f x = concatF (mapF f x)
+
+
+cartesianE :: (App2 IFq IFqTE e, Diff a, Diff b) => e (S a) -> e (S b) -> e (S (a, b))
+cartesianE as bs =
+  concatMapF (\a -> mapFE (pair a) bs) as
+  where
+    concatMapF f x = concatF (mapFE f x)
 
 newtype instance AtomicDelta Int = ADInt (Sum Int) deriving Show
 
@@ -467,8 +541,309 @@ testCode ::
 testCode = runIFq $ runMono $ \xs -> cartesian (fstF xs) (sndF xs)
 
 
+testCodeE ::
+  Code
+    ((S Int, S Int)
+    -> (S (Int, Int),
+        Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int)))))
+testCodeE = runIFq $ runMono $ \xs -> cartesianE (fstF xs) (sndF xs)
 
 
+{-
+
+Code obtained from testCode
+-----------------------------
+
+spliced :: (Diff a, Diff b) =>
+  (S a, S b)
+  -> (S (a, b), Interaction (Delta (S a, S b)) (Delta (S (a, b))))
+spliced =
+    ensureDiffType (\ pa_a1BI4 pb_a1BI5 a_a1BI6
+            -> let v_a1BI7 = fst a_a1BI6 in
+               let
+                 (bs_a1BI8, cs_a1BI9)
+                   = (Seq.unzip
+                        $ fmap
+                             (\ a_a1BIa
+                                -> let v_a1BIb = snd a_a1BI6 in
+                                   let
+                                     (bs_a1BIc, cs_a1BId)
+                                       = (Seq.unzip
+                                            $ fmap
+                                                 (\ a_a1BIe
+                                                    -> let v_a1BIf = (a_a1BIa, a_a1BIe)
+                                                       in (v_a1BIf, ENil))
+                                                (unS v_a1BIb))
+                                   in
+                                     (S bs_a1BIc,
+                                      ECons (Identity cs_a1BId)
+                                        (ECons (Identity a_a1BIa)
+                                           (ECons (Identity a_a1BI6) ENil))))
+                            (unS v_a1BI7)) in
+               let (b_a1BIg, c_a1BIh) = concatC (S bs_a1BI8)
+               in
+                 (b_a1BIg,
+                  let
+                    func_a1BIi
+                      = \ a_a1BIj a_a1BIk a_a1BIl -> mkInteraction pa_a1BI4 pb_a1BI5 (\ da_a1BIm
+                                               -> let v_a1BIn = (a_a1BIk /+ da_a1BIm) in
+                                                  let
+                                                    v_a1BIo
+                                                      = iterTrStateless fstDeltaA da_a1BIm in
+                                                  let
+                                                    fElem_a1BIq
+                                                      = \ a_a1BIt
+                                                          -> let v_a1BIu = snd v_a1BIn in
+                                                             let
+                                                               (bs_a1BIv, cs_a1BIw)
+                                                                 = (Seq.unzip
+                                                                      $ fmap
+                                                                           (\ a_a1BIx
+                                                                              -> let
+                                                                                   v_a1BIy
+                                                                                     = (a_a1BIt,
+                                                                                        a_a1BIx)
+                                                                                 in
+                                                                                   (v_a1BIy, ENil))
+                                                                          (unS v_a1BIu))
+                                                             in
+                                                               (S bs_a1BIv,
+                                                                ECons (Identity cs_a1BIw)
+                                                                  (ECons (Identity a_a1BIt)
+                                                                     (ECons (Identity v_a1BIn)
+                                                                        ENil)))
+                                                    trElem_a1BIp
+                                                      = \ b_a1BIz da_a1BIA c_a1BIB
+                                                          -> let
+                                                               x_a1BID = headEnv c_a1BIB
+                                                               xs_a1BIC = tailEnv c_a1BIB in
+                                                             let
+                                                               x_a1BIF = headEnv xs_a1BIC
+                                                               xs_a1BIE = tailEnv xs_a1BIC in
+                                                             let
+                                                               x_a1BIH = headEnv xs_a1BIE
+                                                               xs_a1BIG = tailEnv xs_a1BIE
+                                                             in
+                                                               case xs_a1BIG of {
+                                                                 ENil
+                                                                   -> let
+                                                                        v_a1BII
+                                                                          = (runIdentity x_a1BIH
+                                                                               /+
+                                                                                 (if b_a1BIz then
+                                                                                      da_a1BIm
+                                                                                  else
+                                                                                      mempty)) in
+                                                                      let
+                                                                        v_a1BIJ
+                                                                          = (runIdentity x_a1BIF
+                                                                               /+ da_a1BIA) in
+                                                                      let
+                                                                        v_a1BIK
+                                                                          = iterTrStateless
+                                                                               sndDeltaA
+                                                                              (if b_a1BIz then
+                                                                                   da_a1BIm
+                                                                               else
+                                                                                   mempty) in
+                                                                      let
+                                                                        fElem_a1BIM
+                                                                          = \ a_a1BIP
+                                                                              -> let
+                                                                                   v_a1BIQ
+                                                                                     = (v_a1BIJ,
+                                                                                        a_a1BIP)
+                                                                                 in (v_a1BIQ, ENil)
+                                                                        trElem_a1BIL
+                                                                          = \ b_a1BIR
+                                                                              da_a1BIS
+                                                                              c_a1BIT
+                                                                              -> case c_a1BIT of {
+                                                                                   ENil
+                                                                                     -> let
+                                                                                          v_a1BIU
+                                                                                            = pairDelta
+                                                                                                 (if b_a1BIR then
+                                                                                                      da_a1BIA
+                                                                                                  else
+                                                                                                      mempty)
+                                                                                                da_a1BIS
+                                                                                        in
+                                                                                          (v_a1BIU,
+                                                                                           ENil) }
+                                                                        (dbs_a1BIN, cs2'_a1BIO)
+                                                                          = mapTr fElem_a1BIM
+                                                                                trElem_a1BIL
+                                                                               (runIdentity
+                                                                                  x_a1BID)
+                                                                              v_a1BIK
+                                                                      in
+                                                                        (dbs_a1BIN,
+                                                                         ECons
+                                                                            (Identity cs2'_a1BIO)
+                                                                           (ECons
+                                                                               (Identity v_a1BIJ)
+                                                                              (ECons
+                                                                                  (Identity
+                                                                                     v_a1BII)
+                                                                                 ENil))) }
+                                                    (dbs_a1BIr, cs2'_a1BIs)
+                                                      = mapTr fElem_a1BIq trElem_a1BIp a_a1BIj
+                                                          v_a1BIo in
+                                                  let
+                                                    (db_a1BIV, c'_a1BIW)
+                                                      = iterTr trConcatCAtomic dbs_a1BIr a_a1BIl
+                                                  in
+                                                    (db_a1BIV,
+                                                     func_a1BIi cs2'_a1BIs v_a1BIn c'_a1BIW))
+                  in func_a1BIi cs_a1BI9 a_a1BI6 c_a1BIh))
+-}
+
+
+{-
+
+Code obtained from testCodeE
+-----------------------------
+
+spliced2 :: (Diff a, Diff b) =>
+  (S a, S b)
+  -> (S (a, b), Interaction (Delta (S a, S b)) (Delta (S (a, b))))
+spliced2 =
+      ensureDiffType (\ pa_a1vbs pb_a1vbt a_a1vbu
+            -> let v_a1vbv = fst a_a1vbu in
+               let
+                 (bs_a1vbw, cs_a1vbx)
+                   = (Seq.unzip
+                        $ fmap
+                             (trackInputInC
+                                (\ a_a1vby
+                                   -> let v_a1vbz = snd a_a1vbu in
+                                      let
+                                        (bs_a1vbA, cs_a1vbB)
+                                          = (Seq.unzip
+                                               $ fmap
+                                                    (trackInputInC
+                                                       (\ a_a1vbC
+                                                          -> let v_a1vbD = (a_a1vby, a_a1vbC)
+                                                             in (v_a1vbD, ENil)))
+                                                   (unS v_a1vbz))
+                                      in (S bs_a1vbA, ECons (Identity cs_a1vbB) ENil)))
+                            (unS v_a1vbv)) in
+               let (b_a1vbE, c_a1vbF) = concatC (S bs_a1vbw)
+               in
+                 (b_a1vbE,
+                  let
+                    func_a1vbG
+                      = \ a_a1vbH a_a1vbI a_a1vbJ -> mkInteraction pa_a1vbs pb_a1vbt (\ da_a1vbK
+                                               -> let v_a1vbL = (a_a1vbH /+ da_a1vbK) in
+                                                  let
+                                                    v_a1vbM
+                                                      = iterTrStateless fstDeltaA da_a1vbK in
+                                                  let
+                                                    fElem_a1vbO
+                                                      = trackInputInC
+                                                          (\ a_a1vbR
+                                                             -> let v_a1vbS = snd v_a1vbL in
+                                                                let
+                                                                  (bs_a1vbT, cs_a1vbU)
+                                                                    = (Seq.unzip
+                                                                         $ fmap
+                                                                              (trackInputInC
+                                                                                 (\ a_a1vbV
+                                                                                    -> let
+                                                                                         v_a1vbW
+                                                                                           = (a_a1vbR,
+                                                                                              a_a1vbV)
+                                                                                       in
+                                                                                         (v_a1vbW,
+                                                                                          ENil)))
+                                                                             (unS v_a1vbS))
+                                                                in
+                                                                  (S bs_a1vbT,
+                                                                   ECons (Identity cs_a1vbU)
+                                                                     ENil))
+                                                    trElem_a1vbN
+                                                      = \ b_a1vbX da_a1vbY (a_a1vbZ, c_a1vc0)
+                                                          -> let
+                                                               x_a1vc2 = headEnv c_a1vc0
+                                                               xs_a1vc1 = tailEnv c_a1vc0
+                                                             in
+                                                               case xs_a1vc1 of {
+                                                                 ENil
+                                                                   -> let
+                                                                        v_a1vc3
+                                                                          = (a_a1vbH
+                                                                               /+
+                                                                                 (if b_a1vbX then
+                                                                                      da_a1vbK
+                                                                                  else
+                                                                                      mempty)) in
+                                                                      let
+                                                                        v_a1vc4
+                                                                          = (a_a1vbZ /+ da_a1vbY) in
+                                                                      let
+                                                                        v_a1vc5
+                                                                          = iterTrStateless
+                                                                               sndDeltaA
+                                                                              (if b_a1vbX then
+                                                                                   da_a1vbK
+                                                                               else
+                                                                                   mempty) in
+                                                                      let
+                                                                        fElem_a1vc7
+                                                                          = trackInputInC
+                                                                              (\ a_a1vca
+                                                                                 -> let
+                                                                                      v_a1vcb
+                                                                                        = (v_a1vc4,
+                                                                                           a_a1vca)
+                                                                                    in
+                                                                                      (v_a1vcb,
+                                                                                       ENil))
+                                                                        trElem_a1vc6
+                                                                          = \ b_a1vcc
+                                                                              da_a1vcd
+                                                                              (a_a1vce, c_a1vcf)
+                                                                              -> case c_a1vcf of {
+                                                                                   ENil
+                                                                                     -> let
+                                                                                          v_a1vcg
+                                                                                            = pairDelta
+                                                                                                 (if b_a1vcc then
+                                                                                                      da_a1vbY
+                                                                                                  else
+                                                                                                      mempty)
+                                                                                                da_a1vcd
+                                                                                        in
+                                                                                          (v_a1vcg,
+                                                                                           (a_a1vce
+                                                                                               /+
+                                                                                                 da_a1vcd,
+                                                                                            ENil)) }
+                                                                        (dbs_a1vc8, cs2'_a1vc9)
+                                                                          = mapTr fElem_a1vc7
+                                                                                trElem_a1vc6
+                                                                               (runIdentity
+                                                                                  x_a1vc2)
+                                                                              v_a1vc5
+                                                                      in
+                                                                        (dbs_a1vc8,
+                                                                         (a_a1vbZ /+ da_a1vbY,
+                                                                          ECons
+                                                                             (Identity cs2'_a1vc9)
+                                                                            ENil)) }
+                                                    (dbs_a1vbP, cs2'_a1vbQ)
+                                                      = mapTr fElem_a1vbO trElem_a1vbN a_a1vbI
+                                                          v_a1vbM in
+                                                  let
+                                                    (db_a1vch, c'_a1vci)
+                                                      = iterTr trConcatCAtomic dbs_a1vbP a_a1vbJ
+                                                  in
+                                                    (db_a1vch,
+                                                     func_a1vbG (a_a1vbH /+ da_a1vbK) cs2'_a1vbQ
+                                                       c'_a1vci))
+                  in func_a1vbG a_a1vbu cs_a1vbx c_a1vbF))
+-}
 
 -- >>> let f = $$( testCode )
 -- >>> let (res, tr) = f (S $ Seq.fromList [1,2,3], S $ Seq.fromList [10, 20, 30])
