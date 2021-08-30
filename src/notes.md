@@ -120,7 +120,7 @@ There is a still some issues in this approach: we need to keep track of `Γ` inf
 
 We must include the information of `A` to `C`, e.g., as `C = C₁ × C₂ × A`, in order to call the delta translator associated with the let body. But in many cases, we do not need to do so. FOr example, among the sequence combinators, only `map` requires the `Γ` part. A related observation is that `map`'s delta translator uses the `\Gamma` used in the forward computation, in addition to the `\Gamma` part used in the computation of delta translators. 
 
-
+**Aug 30, 2021** Implemented the idea above in `./Data/IFqTEU.hs` ("IF", "q", "T", "E" and "U" stand for "incrementalized functions", "quoted", "terms", "environments", and "uses", respectively). We have not tested the 'map' API. Code generation takes at least quadratic time due to handling of free variables. 
 
 
 
