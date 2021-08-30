@@ -103,7 +103,26 @@ Thus, we can use `hmap` to convert `(Δ₁a -> c -> (Δb × c))` into `(Δa -> c
 Also, even though we consider atomic updates, what we will obtain is the sequence of updates on the sequence instead of an atomic update, and we have to consider how to combine them with an update on `\Gamma`; the source of the trouble mentioned above is still there. Notice that we cannot assume that an atomic update is produced for an atomic update. The granularity of updates may differ for data. It may be impossible for us to avoid running the code as many as the number of atomic updates, but we are hoping that this can be done by using one code. 
 
 
-**Aug 26, 2021** The issue of code duplication has been resolved. However, the result is not yet satisfactory. We need to know whether `ΔΓ` affects the delta translator `(ΔΓ × ΔA × C2 -> ΔB × C2)`, as it requires us to map the function to the connections (caches) (`Sequence C2`), which is rather costly. Also, the `map` API requires us to run `f` of `map f` if an insertion happens. To handle the case, the implementation of the API map keep the `Γ` to obtain an updated version of `f`, while we know updating the free variables in `f` (or `f`'s closure is enough).
+**Aug 26, 2021** The issue of code duplication has been resolved. However, the result is not yet satisfactory. We need to know whether `ΔΓ` affects the delta translator `(ΔΓ × ΔA × C2 -> ΔB × C2)`, as it requires us to map the function to the connections (caches) (`Sequence C2`), which is rather costly. Also, the `map` API requires us to run `f` of `map f` if an insertion happens. To handle the case, the implementation of the API map keep the `Γ` to obtain an updated version of `f`, while we know updating the free variables in `f` (or `f`'s closure is enough). This means O(n) memory is required if `map` is nested `n` times.
+
+**Aug 27, 2021** I implemented a new interface that interprets terms-in-context `Γ |- e : A` as 
+
+    ∃C. (Γ -> A × C) × (Γ × ΔΓ × C -> ΔA × C) 
+
+(Here, the delta translater part takes additional argument Γ.) This approach removes the issue of quadratic memory consumption of `map`.
+
+There is a still some issues in this approach: we need to keep track of `Γ` information, whether or not this is useful or not. For example, for "let"
+
+    (Γ -> A × C₁) × (Γ × ΔΓ × C₁ -> ΔA × C₁) 
+    (Γ × A -> B × C₂) × (Γ × A × ΔΓ × ΔA × C₂ -> ΔB × C₂) 
+    ------------------------------------------------------(let) 
+    ∃C. (Γ -> B × C) × (Γ × ΔΓ × C -> ΔB × C) 
+
+We must include the information of `A` to `C`, e.g., as `C = C₁ × C₂ × A`, in order to call the delta translator associated with the let body. But in many cases, we do not need to do so. FOr example, among the sequence combinators, only `map` requires the `Γ` part. A related observation is that `map`'s delta translator uses the `\Gamma` used in the forward computation, in addition to the `\Gamma` part used in the computation of delta translators. 
+
+
+
+
 
 ---
 
