@@ -20,7 +20,6 @@ import           Language.Unembedding
 import           Data.Coerce          (coerce)
 import           Data.Semigroup       (Sum (..))
 
-import           Data.Delta
 import           Data.Incrementalized
 import           Data.Proxy           (Proxy (..))
 

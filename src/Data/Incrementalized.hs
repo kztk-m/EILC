@@ -6,7 +6,6 @@
 module Data.Incrementalized where
 
 import           Data.Delta
-import           Data.Kind  (Type)
 
 import           Data.Code
 

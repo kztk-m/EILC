@@ -11,8 +11,7 @@
 
 module Data.Env where
 
-import           Data.Kind     (Constraint, Type)
-import           Data.Typeable (Proxy)
+import           Data.Kind (Constraint, Type)
 
 data Env (f :: k -> Type) (as :: [k]) where
   ENil  :: Env f '[]

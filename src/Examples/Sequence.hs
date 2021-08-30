@@ -1,18 +1,20 @@
-{-# LANGUAGE DataKinds                 #-}
-{-# LANGUAGE FlexibleContexts          #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE ScopedTypeVariables       #-}
-{-# LANGUAGE TemplateHaskell           #-}
-{-# LANGUAGE TypeApplications          #-}
-{-# LANGUAGE TypeFamilies              #-}
-{-# LANGUAGE TypeFamilyDependencies    #-}
-{-# LANGUAGE TypeOperators             #-}
-{-# LANGUAGE UndecidableInstances      #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE NoMonomorphismRestriction  #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeFamilyDependencies     #-}
+{-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE FlexibleInstances         #-}
-{-# LANGUAGE StandaloneDeriving        #-}
-{-# LANGUAGE ViewPatterns              #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE ViewPatterns               #-}
 
 module Examples.Sequence where
 
@@ -26,15 +28,14 @@ import           Language.Unembedding
 
 import           Data.Env
 import qualified Data.Foldable         (toList)
-import           Data.Functor.Identity (Identity (Identity, runIdentity))
+
 import           Data.Sequence         (Seq)
 import           Data.Typeable         (Proxy (Proxy))
 
 import           Data.Monoid
 
-import           Data.Code
-import           Data.Delta
 
+import           Data.Functor.Identity (Identity)
 import           Data.Incrementalized
 
 newtype S a = S { unS :: Seq.Seq a }
@@ -532,25 +533,29 @@ cartesianE as bs =
   where
     concatMapF f x = concatF (mapFE f x)
 
-newtype instance AtomicDelta Int = ADInt (Sum Int) deriving Show
+-- To avoid errors caused by "stack repl"
+newtype MyInt = MyInt { unMyInt :: Int }
+  deriving newtype (Read, Show, Num, Enum, Real, Integral, Eq, Ord)
 
-instance Diff Int where
+newtype instance AtomicDelta MyInt = ADInt (Sum Int) deriving Show
+
+instance Diff MyInt where
   applyAtomicDelta a (coerce -> getSum -> n) = a + n
 
 
 testCode ::
   Code
-    ((S Int, S Int)
-    -> (S (Int, Int),
-        Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int)))))
+    ((S MyInt, S MyInt)
+    -> (S (MyInt, MyInt),
+        Interaction (Delta (S MyInt, S MyInt)) (Delta (S (MyInt, MyInt)))))
 testCode = runIFq $ runMono $ \xs -> cartesian (fstF xs) (sndF xs)
 
 
 testCodeE ::
   Code
-    ((S Int, S Int)
-    -> (S (Int, Int),
-        Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int)))))
+    ((S MyInt, S MyInt)
+    -> (S (MyInt, MyInt),
+        Interaction (Delta (S MyInt, S MyInt)) (Delta (S (MyInt, MyInt)))))
 testCodeE = runIFq $ runMono $ \xs -> cartesianE (fstF xs) (sndF xs)
 
 
