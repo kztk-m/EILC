@@ -22,6 +22,7 @@ import           Data.Semigroup       (Sum (..))
 
 import           Data.Delta
 import           Data.Incrementalized
+import           Data.Proxy           (Proxy (..))
 
 newtype Bag a = Bag [a] deriving (Monoid, Semigroup)
 
@@ -67,17 +68,14 @@ appC = fromStateless (\z -> [|| case $$z of { (Bag xs, Bag ys) -> Bag (xs ++ ys)
 
 -- appF :: App IFq e => e (Bag Double) -> e (Bag Double) -> e (Bag Double)
 appF ::
-  (K cat (Bag Double, Bag Double),
-  K cat (Bag Double), K cat a,
-  K cat b, K cat (Prod cat a b),
+  (K cat ~ Diff, Diff a, Diff b,
   App cat e, IncrementalizedQ cat,
   Prod cat a b ~ (Bag Double, Bag Double)) =>
   e a -> e b -> e (Bag Double)
 appF x y = lift appC (pair x y)
 
 cascadeAppS ::
-  (K cat (Bag Double), K cat b, K cat (Bag Double, Bag Double),
-  K cat (Prod cat (Bag Double) (Bag Double)),
+  (K cat ~ Diff, Diff b,
   LetTerm cat term, App2 cat term e, IncrementalizedQ cat,
   Prod cat (Bag Double) (Bag Double) ~ (Bag Double, Bag Double)) =>
   Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
@@ -85,8 +83,7 @@ cascadeAppS 0 x f = f x
 cascadeAppS n x f = share (appF x x) $ \y -> cascadeAppS (n-1) y f
 
 cascadeAppC ::
-  (K cat (Bag Double, Bag Double), K cat (Bag Double),
-  K cat (Prod cat (Bag Double) (Bag Double)), App cat e,
+  (K cat ~ Diff, App cat e,
   IncrementalizedQ cat,
   Prod cat (Bag Double) (Bag Double) ~ (Bag Double, Bag Double)) =>
   Int -> e (Bag Double) -> (e (Bag Double) -> p) -> p
@@ -100,10 +97,11 @@ aveDupDup x = cascadeAppS 4 x ave
 aveDupDup' :: (App2 IFq IFqT e) => e (Bag Double) -> e Double
 aveDupDup' x = cascadeAppC 4 x ave
 
-ave :: (IncrementalizedQ cat, App2 cat t e,
-        K cat Double, Prod cat Double Double ~ (Double, Double),
-        K cat (Double, Double), K cat Int, K cat (Bag Double))
-       => (e (Bag Double) -> e Double)
+ave ::
+  (IncrementalizedQ cat, App2 cat t e,
+   Diff ~ K cat,
+   Prod cat Double Double ~ (Double, Double))
+  => (e (Bag Double) -> e Double)
 ave = \x -> mysum x `mydiv` i2d (len x)
   where
     lenC :: IncrementalizedQ cat => cat (Bag Double) Int
@@ -130,6 +128,9 @@ ave = \x -> mysum x `mydiv` i2d (len x)
     mysum = lift sumC
     mydiv x y = lift divC (pair x y)
 
+
+runMonoWith :: (Term cat term, K cat a, K cat b) => Proxy term -> (TSem cat term a -> TSem cat term b) -> cat a b
+runMonoWith _ = runMono
 
 
 -- sumD :: Bag Double -> Delta (Bag Double) -> Delta Double
@@ -160,35 +161,35 @@ ave = \x -> mysum x `mydiv` i2d (len x)
 -- aveD x = shareI x $ \y -> divF (pairI (sumF y) (i2dF (lenF y)))
 
 
--- >>> let f = $$(runIFq (runAppMono' ave))
+-- >>> let f = $$(runIFq (runMonoWith (Proxy :: Proxy IFqT) ave))
 -- >>> let (res, tr) = f (Bag [1..100])
 -- >>> res
--- >>> let dbs = iterations tr [ [ADBag $ Bag [1], ADBag $ Bag [2], ADBag $ Bag [30]] ]
+-- >>> let (dbs, _) = runInteraction tr $ monoidFromList [ADBag $ Bag [1], ADBag $ Bag [2], ADBag $ Bag [30]]
 -- >>> dbs
--- >>> res /+ mconcat dbs
+-- >>> res /+ dbs
 -- 50.5
--- [[ADDouble (Sum {getSum = -1.1504854368932058})]]
+-- monoidFromList [ADDouble (Sum {getSum = -1.1504854368932058})]
 -- 49.349514563106794
 
--- >>> let f = $$(runIFq (runAppMono' aveDupDup))
+-- >>> let f = $$(runIFq (runMonoWith (Proxy :: Proxy IFqT) aveDupDup))
 -- >>> let (res, tr) = f (Bag [1..100])
 -- >>> res
--- >>> let dbs = iterations tr [ [ADBag $ Bag [1], ADBag $ Bag [2], ADBag $ Bag [30]] ]
+-- >>> let (dbs, _) = runInteraction tr $ monoidFromList [ADBag $ Bag [1], ADBag $ Bag [2], ADBag $ Bag [30]]
 -- >>> dbs
--- >>> res /+ mconcat dbs
+-- >>> res /+ dbs
 -- 50.5
--- [[ADDouble (Sum {getSum = -1.1504854368932058})]]
+-- monoidFromList [ADDouble (Sum {getSum = -1.1504854368932058})]
 -- 49.349514563106794
 
 
--- >>> let f = $$(runIFq (runAppMono' aveDupDup'))
+-- >>> let f = $$(runIFq (runMonoWith (Proxy :: Proxy IFqT) aveDupDup'))
 -- >>> let (res, tr) = f (Bag [1..100])
 -- >>> res
--- >>> let dbs = iterations tr [ [ADBag $ Bag [1], ADBag $ Bag [2], ADBag $ Bag [30]] ]
+-- >>> let (dbs, _) = runInteraction tr $ monoidFromList [ADBag $ Bag [1], ADBag $ Bag [2], ADBag $ Bag [30]]
 -- >>> dbs
--- >>> res /+ mconcat dbs
+-- >>> res /+ dbs
 -- 50.5
--- [[ADDouble (Sum {getSum = -1.1504854368932058})]]
+-- monoidFromList [ADDouble (Sum {getSum = -1.1504854368932058})]
 -- 49.349514563106794
 
 
