@@ -113,7 +113,7 @@ newtype RearrEnv as us us' =
   RearrEnv { rearrEnv :: forall f. Env f (Extr as us) -> Env f (Extr as us') }
 
 mergeTupled ::
-  forall us1 us2 as f.
+  forall us1 us2 as.
   Env SBool us1 -> Env SBool us2 -> Env Proxy as
   -> (Env SBool (MergeUses us1 us2),
       RearrEnv as (MergeUses us1 us2) us1,
