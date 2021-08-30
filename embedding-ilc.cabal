@@ -38,6 +38,7 @@ library
         Data.IFq
         Data.IFqT 
         Data.IFqTE 
+        Data.IFqTEU 
         Langauge.Unembedding        
         EILC
 
