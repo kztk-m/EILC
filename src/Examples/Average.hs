@@ -4,6 +4,12 @@
 {-# LANGUAGE TypeFamilies               #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE QuantifiedConstraints      #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE UndecidableInstances       #-}
+{-# LANGUAGE UndecidableSuperClasses    #-}
 {-# LANGUAGE ViewPatterns               #-}
 
 module Examples.Average where
@@ -13,6 +19,9 @@ import           Language.Unembedding
 
 import           Data.Coerce          (coerce)
 import           Data.Semigroup       (Sum (..))
+
+import           Data.Delta
+import           Data.Incrementalized
 
 newtype Bag a = Bag [a] deriving (Monoid, Semigroup)
 
@@ -48,19 +57,39 @@ instance Diff Double where
 --   a /+ da = a + getSum da
 
 
-appC :: IFq (Bag Double, Bag Double) (Bag Double)
-appC = ifqFromStateless (\z -> [|| case $$z of { (Bag xs, Bag ys) -> Bag (xs ++ ys) } ||])
-                        (\dz -> [|| fstDelta $$dz <> sndDelta $$dz ||])
+-- appC :: IFq (Bag Double, Bag Double) (Bag Double)
+appC :: IncrementalizedQ cat => cat  (Bag Double, Bag Double) (Bag Double)
+appC = fromStateless (\z -> [|| case $$z of { (Bag xs, Bag ys) -> Bag (xs ++ ys) } ||])
+                     (\dz -> [|| fstDelta $$dz <> sndDelta $$dz ||])
 --                        (\dz -> [|| case $$dz of { (Bag dx, Bag dy) -> Bag (dx ++ dy) } ||])
-appF :: App IFq e => e (Bag Double) -> e (Bag Double) -> e (Bag Double)
+
+
+
+-- appF :: App IFq e => e (Bag Double) -> e (Bag Double) -> e (Bag Double)
+appF ::
+  (K cat (Bag Double, Bag Double),
+  K cat (Bag Double), K cat a,
+  K cat b, K cat (Prod cat a b),
+  App cat e, IncrementalizedQ cat,
+  Prod cat a b ~ (Bag Double, Bag Double)) =>
+  e a -> e b -> e (Bag Double)
 appF x y = lift appC (pair x y)
 
-
-cascadeAppS :: (App2 IFq IFqT e) => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
+cascadeAppS ::
+  (K cat (Bag Double), K cat b, K cat (Bag Double, Bag Double),
+  K cat (Prod cat (Bag Double) (Bag Double)),
+  LetTerm cat term, App2 cat term e, IncrementalizedQ cat,
+  Prod cat (Bag Double) (Bag Double) ~ (Bag Double, Bag Double)) =>
+  Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
 cascadeAppS 0 x f = f x
 cascadeAppS n x f = share (appF x x) $ \y -> cascadeAppS (n-1) y f
 
-cascadeAppC :: (App2 IFq IFqT e) => Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
+cascadeAppC ::
+  (K cat (Bag Double, Bag Double), K cat (Bag Double),
+  K cat (Prod cat (Bag Double) (Bag Double)), App cat e,
+  IncrementalizedQ cat,
+  Prod cat (Bag Double) (Bag Double) ~ (Bag Double, Bag Double)) =>
+  Int -> e (Bag Double) -> (e (Bag Double) -> p) -> p
 cascadeAppC 0 x f = f x
 cascadeAppC n x f = let y = appF x x in cascadeAppC (n-1) y f
 
@@ -71,26 +100,29 @@ aveDupDup x = cascadeAppS 4 x ave
 aveDupDup' :: (App2 IFq IFqT e) => e (Bag Double) -> e Double
 aveDupDup' x = cascadeAppC 4 x ave
 
-ave :: App2 IFq IFqT e => (e (Bag Double) -> e Double)
+ave :: (IncrementalizedQ cat, App2 cat t e,
+        K cat Double, Prod cat Double Double ~ (Double, Double),
+        K cat (Double, Double), K cat Int, K cat (Bag Double))
+       => (e (Bag Double) -> e Double)
 ave = \x -> mysum x `mydiv` i2d (len x)
   where
-    lenC :: IFq (Bag Double) Int
-    lenC = ifqFromStateless (\a  -> [|| case $$a of { Bag as -> length as } ||])
-                            (\da -> [|| fmap (\x -> case x of { ADBag (Bag as) -> ADInt (Sum (length as)) }) $$da ||])
+    lenC :: IncrementalizedQ cat => cat (Bag Double) Int
+    lenC = fromStateless (\a  -> [|| case $$a of { Bag as -> length as } ||])
+                         (\da -> [|| fmap (\x -> case x of { ADBag (Bag as) -> ADInt (Sum (length as)) }) $$da ||])
 
-    i2dC :: IFq Int Double
-    i2dC = ifqFromStateless (\a  -> [|| fromIntegral $$a :: Double ||])
-                            (\da -> [|| fmap (\(ADInt x) -> ADDouble (Sum $ fromIntegral $ getSum x)) $$da ||])
+    i2dC :: IncrementalizedQ cat => cat Int Double
+    i2dC = fromStateless (\a  -> [|| fromIntegral $$a :: Double ||])
+                         (\da -> [|| fmap (\(ADInt x) -> ADDouble (Sum $ fromIntegral $ getSum x)) $$da ||])
     -- (\da -> [|| Sum (fromIntegral (getSum $$da) :: Double) ||])
 
-    sumC :: IFq (Bag Double) Double
-    sumC = ifqFromStateless (\a  -> [|| case $$a of { Bag as -> sum as } ||])
-                            (\da -> [|| fmap (\ (ADBag (Bag as)) -> ADDouble (Sum (sum as)) ) $$da ||])
+    sumC :: IncrementalizedQ cat => cat (Bag Double) Double
+    sumC = fromStateless (\a  -> [|| case $$a of { Bag as -> sum as } ||])
+                         (\da -> [|| fmap (\ (ADBag (Bag as)) -> ADDouble (Sum (sum as)) ) $$da ||])
 --                            (\da -> [|| case $$da of { Bag as' -> Sum (sum as') } ||])
 
-    divC :: IFq (Double, Double) Double
-    divC = ifqFromD (\z -> [|| uncurry (/) $$z ||])
-                    (\z dz -> [|| let {(x, y) = $$z; dx = fstDelta $$dz ; dy = sndDelta $$dz } in injMonoid (ADDouble $ Sum $ (x /+ dx) / (y /+ dy) - x / y) ||])
+    divC :: IncrementalizedQ cat => cat (Double, Double) Double
+    divC = fromD (\z -> [|| uncurry (/) $$z ||])
+                 (\z dz -> [|| let {(x, y) = $$z; dx = fstDelta $$dz ; dy = sndDelta $$dz } in injMonoid (ADDouble $ Sum $ (x /+ dx) / (y /+ dy) - x / y) ||])
 --                    (\z dz -> [|| let {(x, y) = $$z ; (dx, dy) = $$dz} in Sum $ (x /+ dx) / (y /+ dy) - x / y ||])
 
     len = lift lenC

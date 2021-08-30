@@ -32,6 +32,11 @@ import           Data.Typeable         (Proxy (Proxy))
 
 import           Data.Monoid
 
+import           Data.Code
+import           Data.Delta
+
+import           Data.Incrementalized
+
 newtype S a = S { unS :: Seq.Seq a }
   deriving Show
 
@@ -91,8 +96,8 @@ singletonF :: (App2 IFq t e, Diff a) => e a -> e (S a)
 singletonF = lift singletonC
   where
     singletonC =
-      ifqFromStateless (\a -> [|| S (Seq.singleton $$a) ||])
-                       (\da -> [|| iterTrStateless dsingleton $$da ||])
+      fromStateless (\a -> [|| S (Seq.singleton $$a) ||])
+                    (\da -> [|| iterTrStateless dsingleton $$da ||])
       -- ifqFromStatelessA (\a -> [|| S (Seq.singleton $$a) ||])
       --                   (\da -> [|| dsingleton $$da ||])
 
@@ -102,7 +107,7 @@ dempty = mempty
 emptyF :: (App2 IFq t e, Diff a) => e (S a)
 emptyF = lift emptyC unit
   where
-      emptyC = ifqFromStateless (const [|| S Seq.empty ||]) (const [|| dempty ||])
+      emptyC = fromStateless (const [|| S Seq.empty ||]) (const [|| dempty ||])
 --    emptyC = ifqFromStatelessA (const [|| S Seq.empty ||]) (const [|| dempty ||])
 
 type ConcatC = Seq.Seq Int
@@ -173,7 +178,7 @@ trConcatCAtomic (SRep i ds) c =
       (injMonoid (SRearr (offset + j) n (offset + k)), ci)
 
 concatF :: (App2 IFq t e, Diff a) => e (S (S a)) -> e (S a)
-concatF = lift $ ifqFromFunctions [|| concatC ||] [|| iterTr trConcatCAtomic ||]
+concatF = lift $ fromFunctions [|| concatC ||] [|| iterTr trConcatCAtomic ||]
   -- lift $ ifqFromFunctionsA [|| concatC ||] [|| trConcatCAtomic ||]
 
 
@@ -507,10 +512,10 @@ mapFE :: forall e a b. (App2 IFq IFqTE e, Diff a) => (e a -> e b) -> e (S a) -> 
 mapFE = flip (liftSO2 (Proxy @'[ '[], '[a] ]) mapTE)
 
 fstF :: (App2 IFq t e, Diff a, Diff b) => e (a, b) -> e a
-fstF = lift $ ifqFromStateless (\a -> [|| fst $$a ||]) (\dz -> [|| iterTrStateless fstDeltaA $$dz||])
+fstF = lift $ fromStateless (\a -> [|| fst $$a ||]) (\dz -> [|| iterTrStateless fstDeltaA $$dz||])
 
 sndF :: (App2 IFq t e, Diff a, Diff b) => e (a, b) -> e b
-sndF = lift $ ifqFromStateless (\a -> [|| snd $$a ||]) (\dz -> [|| iterTrStateless sndDeltaA $$dz ||])
+sndF = lift $ fromStateless (\a -> [|| snd $$a ||]) (\dz -> [|| iterTrStateless sndDeltaA $$dz ||])
 
 
 

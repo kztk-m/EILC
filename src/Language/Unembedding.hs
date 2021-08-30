@@ -16,7 +16,8 @@
 {-# LANGUAGE UndecidableInstances   #-}
 module Language.Unembedding (
 
-  HasProduct(..), Term(..),
+  HasProduct(..), Term(..), LetTerm(..), FunTerm(..),
+
 
   App(..),
   Sig2, type (~>),
@@ -31,6 +32,8 @@ module Language.Unembedding (
   App2(..), TSem,
 
   run, runMono,
+
+  share, lam, app
   ) where
 
 -- import           Control.Category
@@ -85,7 +88,7 @@ data TermF c term env (s :: Sig2 k) :: Type where
   TermF :: AllIn ts c => term (Append ts env) r -> TermF c term env (ts ~> r)
 
 class App cat e => App2 (cat :: k -> k -> Type) (term :: [k] -> k -> Type) (e :: k -> Type) | e -> term where
-  liftSO :: (forall p. Env (TermF (K cat) term p) ss -> term p r) -> Env (Fun (K cat) e) ss -> e r
+  liftSO :: (forall p. AllIn p (K cat) => Env (TermF (K cat) term p) ss -> term p r) -> Env (Fun (K cat) e) ss -> e r
 
 class ToEnvProxy as where
   toEnvProxy :: Env Proxy as
@@ -175,28 +178,28 @@ instance (asp ~ Append as p, AllIn as c, s ~ (as ~> a), PackTermF c term p ss r 
 liftSO0 ::
   forall cat term e r.
   App2 cat term e
-  => (forall p. term p r) -> e r
+  => (forall p. AllIn p (K cat) => term p r) -> e r
 liftSO0 e = unpackFun @(K cat) @e @'[] (liftSO (packTermF e))
 
 
 liftSO1 ::
   forall cat term e as a arg r.
   (App2 cat term e, PackFunArg (K cat) e as a arg, AllIn as (K cat) )
-  => Proxy '[as] -> (forall p. term (Append as p) a -> term p r) -> arg -> e r
+  => Proxy '[as] -> (forall p. AllIn p (K cat) => term (Append as p) a -> term p r) -> arg -> e r
 liftSO1 _ e = unpackFun @(K cat) @e @'[as ~> a] (liftSO (packTermF e))
 
 liftSO2 ::
   forall cat term e as1 a1 as2 a2 arg1 arg2 r.
   (App2 cat term e, PackFunArg (K cat) e as1 a1 arg1, PackFunArg (K cat) e as2 a2 arg2, AllIn as1 (K cat), AllIn as2 (K cat))
   => Proxy '[as1, as2]
-  -> (forall p. term (Append as1 p) a1 -> term (Append as2 p) a2 -> term p r) -> arg1 -> arg2 -> e r
+  -> (forall p. AllIn p (K cat) => term (Append as1 p) a1 -> term (Append as2 p) a2 -> term p r) -> arg1 -> arg2 -> e r
 liftSO2 _ e = unpackFun @(K cat) @e @'[as1 ~> a1, as2 ~> a2] (liftSO (packTermF e))
 
 liftSO3 ::
   forall cat term e as1 a1 as2 a2 as3 a3 arg1 arg2 arg3 r.
   (App2 cat term e, PackFunArg (K cat) e as1 a1 arg1, PackFunArg (K cat) e as2 a2 arg2, PackFunArg (K cat) e as3 a3 arg3, AllIn as1 (K cat), AllIn as2 (K cat), AllIn as3 (K cat))
   => Proxy '[as1, as2, as3]
-  -> (forall p. term (Append as1 p) a1 -> term (Append as2 p) a2 -> term (Append as3 p) a3 -> term p r) -> arg1 -> arg2 -> arg3 -> e r
+  -> (forall p. AllIn p (K cat) => term (Append as1 p) a1 -> term (Append as2 p) a2 -> term (Append as3 p) a3 -> term p r) -> arg1 -> arg2 -> arg3 -> e r
 liftSO3 _ e = unpackFun @(K cat) @e @'[as1 ~> a1, as2 ~> a2, as3 ~> a3] (liftSO (packTermF e))
 
 
@@ -221,6 +224,37 @@ class (CategoryK cat, HasProduct cat) => Term cat (term :: [k] -> k -> Type) | t
 
 --  letTerm    :: term s a -> term (a ': s) b -> term s b
   unliftTerm :: (K cat a, K cat b) => term '[a] b -> cat a b
+
+class Term cat term => LetTerm cat term where
+  letTerm :: (AllIn s (K cat), K cat a, K cat b) => term s a -> term (a ': s) b -> term s b
+
+class LetTerm cat term => FunTerm cat (term :: [k] -> k -> Type) where
+  type IHom cat (a :: k) (b :: k) :: k
+  lamTerm   :: (AllIn s (K cat), K cat a, K cat b) => term (a : s) b -> term s (IHom cat a b)
+  unlamTerm :: (AllIn s (K cat), K cat a, K cat b) => term s (IHom cat a b) -> term (a : s) b
+
+share ::
+  forall cat term e a b.
+  (LetTerm cat term, App2 cat term e, K cat a, K cat b)
+  => e a -> (e a -> e b) -> e b
+share = liftSO2 (Proxy @'[ '[], '[a] ] ) letTerm
+
+lam ::
+  forall cat term e a b.
+  (FunTerm cat term, App2 cat term e, K cat a, K cat b)
+  => (e a -> e b) -> e (IHom cat a b)
+lam = liftSO1 (Proxy @'[ '[a] ]) lamTerm
+
+app ::
+  forall cat term e a b.
+  (FunTerm cat term, App2 cat term e, K cat a, K cat b)
+  => e (IHom cat a b) -> e a -> e b
+app =
+  liftSO2 (Proxy @'[ '[], '[] ])
+  (\e1 e2 -> letTerm e2 (unlamTerm e1) )
+
+
+
 
 type family Products cat (ks :: [k]) :: k where
   Products cat '[]       = Unit cat

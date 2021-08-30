@@ -33,13 +33,19 @@ library
     import: deps 
     exposed-modules:  
         Data.Env        
+        Data.Delta 
+        Data.Incrementalized
+        Data.IFq
+        Data.IFqT 
+        Data.IFqTE 
         Langauge.Unembedding        
         EILC
 
     -- Modules included in this library but not exported.
     other-modules:
         Examples.Average
-        Examples.Sequence 
+        Examples.Sequence
+        Data.IF  
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
