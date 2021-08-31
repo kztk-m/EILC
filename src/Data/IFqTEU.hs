@@ -16,7 +16,7 @@
 {-# LANGUAGE UndecidableInstances      #-}
 
 
-module Data.IFqTE where
+module Data.IFqTEU where
 
 import           Data.Code            (Code, CodeC, PackedCode (..),
                                        PackedCodeDelta (..), mkLet)
@@ -139,18 +139,17 @@ mergeTupled (ECons SFalse us1) (ECons SFalse us2) (ECons _ tenv)
 
 
 data IFqTEU as b =
-  forall cs us1 us2.
+  forall cs us.
   IFqTEU
       (Env Proxy as)
       (Conn Proxy cs)
-      (Env SBool us1)
-      (Env PackedCode (Extr as us1) -> CodeC (Code b, Conn PackedCode cs))
-      (Env SBool us2)
-      (Env PackedCode (Extr as us2) -> Env PackedCodeDelta (Extr as us2)-> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
+      (Env SBool us)
+      (Env PackedCode (Extr as us) -> CodeC (Code b, Conn PackedCode cs))
+      (Env PackedCode (Extr as us) -> Env PackedCodeDelta (Extr as us)-> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
 
 instance Term IFq IFqTEU where
   mapTerm (IFq sh2 f2 tr2)
-          (IFqTEU tenv sh1 uf1 f1 utr1 tr1) = IFqTEU tenv (joinConn sh1 sh2) uf1 f utr1 tr
+          (IFqTEU tenv sh1 u1 f1 tr1) = IFqTEU tenv (joinConn sh1 sh2) u1 f tr
     where
       f a = do
         (b, c1) <- f1 a
@@ -163,58 +162,55 @@ instance Term IFq IFqTEU where
         return (dc, joinConn c1' c2')
 
   multTerm :: forall as a b. IFqTEU as a -> IFqTEU as b -> IFqTEU as (a, b)
-  multTerm (IFqTEU tenv sh1 uf1 f1 utr1 tr1) (IFqTEU _ sh2 uf2 f2 utr2 tr2)
-    = IFqTEU tenv (joinConn sh1 sh2) uf f utr tr
+  multTerm (IFqTEU tenv sh1 u1 f1 tr1) (IFqTEU _ sh2 u2 f2 tr2)
+    = IFqTEU tenv (joinConn sh1 sh2) u f tr
     where
-      (uf, extf1, extf2) = mergeTupled uf1 uf2 tenv
+      (u, ext1, ext2) = mergeTupled u1 u2 tenv
 
       f s = do
-        (a, c1) <- f1 (rearrEnv extf1 s)
-        (b, c2) <- f2 (rearrEnv extf2 s)
+        (a, c1) <- f1 (rearrEnv ext1 s)
+        (b, c2) <- f2 (rearrEnv ext2 s)
         r <- mkLet [|| ($$a, $$b) ||]
         return (r , joinConn c1 c2)
 
-      (utr, exttr1, exttr2) = mergeTupled utr1 utr2 tenv
-
       tr s ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
-        (da, c1') <- tr1 (rearrEnv exttr1 s) (rearrEnv exttr1 ds) c1
-        (db, c2') <- tr2 (rearrEnv exttr2 s) (rearrEnv exttr2 ds) c2
+        (da, c1') <- tr1 (rearrEnv ext1 s) (rearrEnv ext1 ds) c1
+        (db, c2') <- tr2 (rearrEnv ext2 s) (rearrEnv ext2 ds) c2
         r <- mkLet [|| pairDelta $$da $$db ||]
         return ( r, joinConn c1' c2' )
 
-  unitTerm tenv = IFqTEU tenv CNone ENil (\_ -> return ([|| () ||], CNone)) ENil (\_ _ _ -> return ([|| mempty ||], CNone))
+  unitTerm tenv = IFqTEU tenv CNone ENil (\_ -> return ([|| () ||], CNone)) (\_ _ _ -> return ([|| mempty ||], CNone))
 
   var0Term tenv = IFqTEU (ECons Proxy tenv)
                          CNone
                          (ECons STrue ENil)
                          (\(ECons (PackedCode a) _) -> return (a, CNone))
-                         (ECons STrue ENil)
                          (\_ (ECons (PackedCodeDelta da) _) _ -> return (da, CNone))
-  weakenTerm (IFqTEU tenv sh uf f utr tr) = IFqTEU (ECons Proxy tenv) sh (ECons SFalse uf) f (ECons SFalse utr) tr
+  weakenTerm (IFqTEU tenv sh u f tr) = IFqTEU (ECons Proxy tenv) sh (ECons SFalse u) f tr
 
   unliftTerm :: forall a b. Diff a =>  IFqTEU '[a] b -> IFq a b
-  unliftTerm (IFqTEU _ (sh :: Conn Proxy cs) (uf :: Env SBool us1) f (utr :: Env SBool us2) tr) = IFq sh' f' tr'
+  unliftTerm (IFqTEU _ (sh :: Conn Proxy cs) (u :: Env SBool us) f tr) = IFq sh' f' tr'
     where
-      sh' :: Conn Proxy (CSing cs '[a] us2)
-      sh' = case utr of
+      sh' :: Conn Proxy (CSing cs '[a] us)
+      sh' = case u of
         ENil           -> sh
         ECons SFalse _ -> sh
         ECons STrue  _ -> joinConn (CNE (COne (Proxy @a))) sh
 
-      f' :: Code a -> CodeC (Code b, Conn PackedCode (CSing cs '[a] us2))
+      f' :: Code a -> CodeC (Code b, Conn PackedCode (CSing cs '[a] us))
       f' a =
-        case uf of
+        case u of
           ENil           -> conv =<< f ENil
           ECons SFalse _ -> conv =<< f ENil
           ECons STrue  _ -> conv =<< f (ECons (PackedCode a) ENil)
         where
-          conv :: (Code b, Conn PackedCode cs) -> CodeC (Code b, Conn PackedCode (CSing cs '[a] us2))
-          conv (b, c) = case utr of
+          conv :: (Code b, Conn PackedCode cs) -> CodeC (Code b, Conn PackedCode (CSing cs '[a] us))
+          conv (b, c) = case u of
             ENil           -> return (b, c)
             ECons SFalse _ -> return (b, c)
             ECons STrue  _ -> return (b, joinConn (CNE (COne (PackedCode a))) c)
 
-      tr' da cc = case utr of
+      tr' da cc = case u of
         ENil           -> tr ENil ENil cc
         ECons SFalse _ -> tr ENil ENil cc
         ECons STrue _  ->
@@ -236,9 +232,9 @@ type family SafeTail (as :: [k]) :: [k] where
 
 instance LetTerm IFq IFqTEU where
   letTerm :: forall as a b. Diff a => IFqTEU as a -> IFqTEU (a ': as) b -> IFqTEU as b
-  letTerm (IFqTEU tenv (sh1 :: Conn Proxy cs1) (uf1 :: Env SBool usf1) f1 (utr1 :: Env SBool ustr1) tr1)
-          (IFqTEU _    (sh2 :: Conn Proxy cs2) (uf2 :: Env SBool usf2) f2 (utr2 :: Env SBool ustr2) tr2)
-    = IFqTEU tenv sh uf f utr tr
+  letTerm (IFqTEU tenv (sh1 :: Conn Proxy cs1) (u1 :: Env SBool us1) f1 tr1)
+          (IFqTEU _    (sh2 :: Conn Proxy cs2) (u2 :: Env SBool us2) f2 tr2)
+    = IFqTEU tenv sh uf f tr
     where
       tenvA :: Env Proxy (a : as)
       tenvA = ECons Proxy tenv
@@ -246,76 +242,70 @@ instance LetTerm IFq IFqTEU where
       sh12 :: Conn Proxy (Join cs1 cs2)
       sh12 = joinConn sh1 sh2
 
-      sh :: Conn Proxy (CSing (Join cs1 cs2) (a : as) ustr2)
-      sh = case utr2 of
+      sh :: Conn Proxy (CSing (Join cs1 cs2) (a : as) us2)
+      sh = case u2 of
         ENil           -> sh12
         ECons SFalse _ -> sh12
         ECons STrue  _ -> joinConn (CNE (COne (Proxy @a))) sh12
 
-      uf    :: Env SBool (MergeUses usf1 (SafeTail usf2))
-      extf1 :: RearrEnv as (MergeUses usf1 (SafeTail usf2)) usf1
-      extf2 :: RearrEnv as (MergeUses usf1 (SafeTail usf2)) (SafeTail usf2)
+      uf    :: Env SBool (MergeUses us1 (SafeTail us2))
+      ext1 :: RearrEnv as (MergeUses us1 (SafeTail us2)) us1
+      ext2 :: RearrEnv as (MergeUses us1 (SafeTail us2)) (SafeTail us2)
 
-      (uf, extf1, extf2) = mergeTupled uf1 (tail' uf2) tenv
+      (uf, ext1, ext2) = mergeTupled u1 (tail' u2) tenv
 
       tail' :: Env f xs -> Env f (SafeTail xs)
       tail' ENil         = ENil
       tail' (ECons _ xs) = xs
 
-      f :: Env PackedCode (Extr as (MergeUses usf1 (SafeTail usf2)))
-           -> CodeC (Code b, Conn PackedCode (CSing (Join cs1 cs2) (a : as) ustr2))
+      f :: Env PackedCode (Extr as (MergeUses us1 (SafeTail us2)))
+           -> CodeC (Code b, Conn PackedCode (CSing (Join cs1 cs2) (a : as) us2))
       f env = do
-        (a, c1) <- f1 (rearrEnv extf1 env)
+        (a, c1) <- f1 (rearrEnv ext1 env)
         (b, c2) <- f2 (ext a env)
         let c = joinConn c1 c2
         conv a (b, c)
         where
-          ext :: Code a -> Env PackedCode (Extr as (MergeUses usf1 (SafeTail usf2))) -> Env PackedCode (Extr (a : as) usf2)
-          ext a ev = case uf2 of
+          ext :: Code a -> Env PackedCode (Extr as (MergeUses us1 (SafeTail us2))) -> Env PackedCode (Extr (a : as) us2)
+          ext a ev = case u2 of
             ENil           -> ENil
-            ECons SFalse _ -> rearrEnv extf2 ev
-            ECons STrue  _ -> ECons (PackedCode a) (rearrEnv extf2 ev)
+            ECons SFalse _ -> rearrEnv ext2 ev
+            ECons STrue  _ -> ECons (PackedCode a) (rearrEnv ext2 ev)
 
-          conv :: Code a -> (Code b, Conn PackedCode (Join cs1 cs2)) -> CodeC (Code b, Conn PackedCode (CSing (Join cs1 cs2) (a : as) ustr2))
-          conv a (b, c) = case utr2 of
+          conv :: Code a -> (Code b, Conn PackedCode (Join cs1 cs2)) -> CodeC (Code b, Conn PackedCode (CSing (Join cs1 cs2) (a : as) us2))
+          conv a (b, c) = case u2 of
             ENil           -> return (b, c)
             ECons SFalse _ -> return (b, c)
             ECons STrue  _ -> return (b, joinConn (CNE (COne (PackedCode a))) c)
 
-      utr    :: Env SBool (MergeUses ustr1 (SafeTail ustr2))
-      exttr1 :: RearrEnv as (MergeUses ustr1 (SafeTail ustr2)) ustr1
-      exttr2 :: RearrEnv as (MergeUses ustr1 (SafeTail ustr2)) (SafeTail ustr2)
-
-      (utr, exttr1, exttr2) = mergeTupled utr1 (tail' utr2) tenv
-
       tr ::
-        Env PackedCode (Extr as (MergeUses ustr1 (SafeTail ustr2)))
-        -> Env PackedCodeDelta (Extr as (MergeUses ustr1 (SafeTail ustr2)))
-        -> Conn PackedCode (CSing (Join cs1 cs2) (a : as) ustr2)
-        -> CodeC (Code (Delta b), Conn PackedCode (CSing (Join cs1 cs2) (a : as) ustr2))
-      tr env denv c0 = case utr2 of
+        Env PackedCode (Extr as (MergeUses us1 (SafeTail us2)))
+        -> Env PackedCodeDelta (Extr as (MergeUses us1 (SafeTail us2)))
+        -> Conn PackedCode (CSing (Join cs1 cs2) (a : as) us2)
+        -> CodeC (Code (Delta b), Conn PackedCode (CSing (Join cs1 cs2) (a : as) us2))
+      tr env denv c0 = case u2 of
         ENil -> do
           let (c1, c2) = decompConn (isNone sh1) (isNone sh2) c0
-          (_da, c1') <- tr1 (rearrEnv exttr1 env) (rearrEnv exttr1 denv) c1
+          (_da, c1') <- tr1 (rearrEnv ext1 env) (rearrEnv ext1 denv) c1
           (db,  c2') <- tr2 (extractingByNilIsNil tenvA) (extractingByNilIsNil tenvA) c2
           return (db, joinConn c1' c2')
         ECons SFalse _ -> do
           let (c1, c2) = decompConn (isNone sh1) (isNone sh2) c0
-          (_da, c1') <- tr1 (rearrEnv exttr1 env) (rearrEnv exttr1 denv) c1
-          (db,  c2') <- tr2 (rearrEnv exttr2 env) (rearrEnv exttr2 denv) c2
+          (_da, c1') <- tr1 (rearrEnv ext1 env) (rearrEnv ext1 denv) c1
+          (db,  c2') <- tr2 (rearrEnv ext2 env) (rearrEnv ext2 denv) c2
           return (db, joinConn c1' c2')
         ECons STrue _ -> do
           let (CNE (COne (PackedCode a)), cc) = decompConn (IsNoneFalse :: IsNone ('NE ('NEOne a))) (isNone sh12) c0
           let (c1, c2) = decompConn (isNone sh1) (isNone sh2) cc
-          (da, c1') <- tr1 (rearrEnv exttr1 env) (rearrEnv exttr1 denv) c1
+          (da, c1') <- tr1 (rearrEnv ext1 env) (rearrEnv ext1 denv) c1
           (db, c2') <- tr2 (ext (PackedCode a) env) (ext (PackedCodeDelta da) denv) c2
           a' <- mkLet [|| $$a /+ $$da ||]
           return (db, joinConn (CNE (COne (PackedCode a')))$ joinConn c1' c2')
 
         where
-          ext  :: ff a -> Env ff (Extr as (MergeUses ustr1 (SafeTail ustr2))) -> Env ff (Extr (a : as) ustr2)
-          ext x ev = case utr2 of
+          ext  :: ff a -> Env ff (Extr as (MergeUses us1 (SafeTail us2))) -> Env ff (Extr (a : as) us2)
+          ext x ev = case u2 of
             ENil           -> ENil
-            ECons SFalse _ -> rearrEnv exttr2 ev
-            ECons STrue  _ -> ECons x (rearrEnv exttr2 ev)
+            ECons SFalse _ -> rearrEnv ext2 ev
+            ECons STrue  _ -> ECons x (rearrEnv ext2 ev)
 

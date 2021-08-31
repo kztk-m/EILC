@@ -123,7 +123,6 @@ We must include the information of `A` to `C`, e.g., as `C = C₁ × C₂ × A`,
 **Aug 30, 2021** Implemented the idea above in `./Data/IFqTEU.hs` ("IF", "q", "T", "E" and "U" stand for "incrementalized functions", "quoted", "terms", "environments", and "uses", respectively). We have not tested the 'map' API. Code generation takes at least quadratic time due to handling of free variables. 
 
 
-
 ---
 
 
