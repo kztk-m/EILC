@@ -122,6 +122,34 @@ We must include the information of `A` to `C`, e.g., as `C = C₁ × C₂ × A`,
 
 **Aug 30, 2021** Implemented the idea above in `./Data/IFqTEU.hs` ("IF", "q", "T", "E" and "U" stand for "incrementalized functions", "quoted", "terms", "environments", and "uses", respectively). We have not tested the 'map' API. Code generation takes at least quadratic time due to handling of free variables. 
 
+**Oct 1, 2021** Let me summarize the idea in `Data.IFqTEU` that interprets `Γ ⊢ e : A` as 
+
+    ∃C. (Γᵤ -> A × C) × (Γᵤ' × ΔΓᵤ × C -> ΔA × C) 
+
+Here, `Γᵤ` is a binding that is sufficient to evaluate `e` (an environment obtained from Γ by removing unused variables in e) and `Γᵤ'` is a subbinding of Γ that is used to run the Δ translator. Why we need to use such argument? 
+
+ - Δ-translator of `map f` uses Γᵤ for insertions to run `f`. 
+    - Puting it in `C` when needed is less efficient as it requires to copy Γᵤs for each use. 
+ - However, in many cases, Δ-translators do not need Γ.
+ - So, it requires Γᵤ' which is expected to be no larger than Γᵤ. 
+
+However, due to handling of them, the implementation of `map` gets so complicated. __Question: Can we give more simpler ways?__ At least for the simpler version, we can make from the original 
+
+```
+Δmap : (A -> B) -> (A -> ΔA -> ΔB) -> Seq A -> Δ(Seq A) -> Δ(Seq B) 
+```
+
+the 
+
+```
+(Γ × A -> B × C₁) × (ΔΓ × ΔA × C₁ -> ΔB × C₁)
+(Γ -> Seq A × C₂) × (ΔΓ × C₂ -> Δ(Seq A) × C₂)
+-----------------------------------------------(map)
+∃C. (Γ -> Seq B × C) × (ΔΓ × C -> Δ(Seq B) × C)
+```
+
+but the construction suggests that we need to recompute things when we need to use the associated Δ translator---spoiling the usefulness of the cache transfer style. 
+
 
 ---
 
