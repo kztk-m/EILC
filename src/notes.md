@@ -1,9 +1,126 @@
+# Semantics of Terms-in-Contexts
+
+We mainly consider the semantics
+
+    ⟦ Γ ⊢ e : A ⟧ : ∃C. (Γ -> A × C) × (ΔΓ × C -> ΔA × C)
+
+but one might think why 
+
+    ⟦ Γ ⊢ e : A ⟧ : Γ -> A × (Interact ΔΓ ΔA) 
+
+doesn't work where `Interact a b ~ a -> (b, Interact a b)`. A reason why we do not use the latter form is code generation: to make a value of `Interact a b`, we need to use a recursive definition in the meta level; their arguments must be representable in the object level. However, the issue comes when we consider compositional definitions for pairs, for which we want to define a value of `Interact ΔΓ (ΔA × ΔB)` from `Interact ΔΓ ΔA` and `Interact ΔΓ (ΔA × ΔB)`. If we do not care code generation, the definition is quite easy: 
+
+```haskell
+newtype Interact a b = Interact { interact :: a -> (b, Interact a b) } 
+
+pairInteract :: Interact s a -> Interact s b -> Interact s (a, b) 
+pairInteract inta0 intb0 
+    let int inta intb = Interact $ \env -> 
+            let (a, inta') = interact inta env 
+                (b, intb') = interact intb env 
+            in ((a, b), int inta' intb') 
+    in int inta0 intb0 
+```
+
+But, for code generation, we need to represent `Interact ΔΓ ΔA` as an object in the target language. Thus, we should put the whole thing in the `Code` type. 
+
+Notice that is `Interact a b = νX. F X` where `F X = a -> b × X`, we can write it as 
+
+    νX.F X ~ ∃C. C × (C -> F C) ~ ∃C. C × (C -> a -> b × C) ~ ∃C. C × (a × C -> b × C)
+
+Thus, the main difference is where `C` appears. 
+
+In Haskell, where we believe that `νX. F X = μX. F X`, we may be able represent `Interact` as 
+
+    μX.F X ~ forall X. (F X -> X) -> X ~ forall X. ((a -> b × X) -> X) -> X 
+
+Actually, we have a function
+
+```haskell 
+buildI :: (forall x. ((a -> (b, x)) -> x) -> x) -> Interact a b 
+buildI fld = fld Interact 
+                       
+foldI :: Interact a b -> forall x. ((a -> (b, x)) -> x) -> x 
+foldI i f = f $ \a -> let (b, i') = interact i a in (b, foldI i' f)
+```
+
+To avoid confusion of handling the universal quantification, let us prepare the type below: 
+
+```haskell
+newtype FoldI a b = FoldI { runFoldI :: forall x. ((a -> (b, x)) -> x) -> x }
+```
+
+Then, the unit function is defined as
+
+```haskell
+unitFoldI :: FoldI s () 
+unitFoldI = FoldI $ \i -> 
+    let x = i $ \env -> ((), x) 
+    in x 
+```
+
+indicating that generating recursive definition is unavoidable. Much worse is the parsing function, which requires us to do one step unfolding. So, advantages using "fold/build" dispear. 
+
+```haskell
+pairFoldI :: FoldI s a -> FoldI s b -> FoldI s (a, b) 
+pairFoldI fa fb = FoldI $ \i -> 
+    let x fa_ fb_ = i $ \env -> 
+        let (a, fa_') = interact fa_ env 
+            (b, fb_') = interact fb_ env 
+        in ( (a, b), x fa_' fb_')
+    in x (buildI fa) (buildI fb)     
+```
+
+(2021-10-06) Discussions here makes me rethink about the relationship to the following formalism of BX.
+
+```haskell
+type BX a b = a -> (b, b -> Maybe a)
+```
+
+Here, `b -> Maybe a` is just a monadic function. In the incrementalized computaiton, 
+
+```haskell 
+type IF a b = a -> (b, CachedDT a b) 
+data CachedDT a b where 
+    -- c is existentially qualified below 
+    CachedDT :: (Delta a -> c -> (Delta b, c)) -> CachedDT a b   
+```
+
+Can we make the construction more straightforward by using the basic operations on `Sem` and `DSem` below, if the whole operation is represented in the semantics. 
+
+```haskell
+type IF a b = Sem a (b ⊗ DSem' a b) 
+```
+
+For example, we have: 
+
+```haskell
+-- unitS :: Sem s I 
+-- unitD :: DSem s I
+-- unitIL :: Sem a (I ⊗ a) 
+-- inj :: DSem a b -> Sem I (DSem' a b) 
+unit :: IF s I 
+unit = unitS >>> unitIL >>> (id ⊗ inj unitD)  
+
+-- pairS :: Sem s a -> Sem s b -> Sem s (a ⊗ b) 
+-- transS :: Sem ((a, b), (c, d)) ((a,c), (b,d))
+-- inj2 :: (DSem a b -> DSem c d -> DSem e f) -> Sem (DSem' a b ⊗ DSem' c d) (DSem' e f) 
+pair :: IF s a -> IF s b -> IF s (a ⊗ b) 
+pair fa fb = pairS fa fb >>> transS >>> (id ⊗ inj2 pairD) 
+```
+
+This approach seems to work well for products and "let", but may be difficult for "map". What makes "map" so difficult? 
+
+
+
+
+
 # Discussions on Higher-Order APIs
 
 A interesting problem comes form Giarrusso et al.'s paper: What happens if APIs contains higher-orderness? 
 
 An illustrative example is:
-```
+```haskell
 singleton :: a -> Sequence a 
 map :: (a -> b) -> Sequence a -> Sequence b 
 concat :: Sequence (Sequence a) -> Sequence a
@@ -11,7 +128,7 @@ empty :: Sequence a
 ```
 which is used to define 
 
-```
+```haskell
 cartesianProd :: Sequence a -> Sequence b -> Sequence (a, b) 
 cartesianProd xs ys = 
   concatMap (\a -> map (\b -> (a, b)) ys) xs 
