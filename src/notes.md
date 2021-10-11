@@ -109,11 +109,45 @@ pair :: IF s a -> IF s b -> IF s (a ⊗ b)
 pair fa fb = pairS fa fb >>> transS >>> (id ⊗ inj2 pairD) 
 ```
 
-This approach seems to work well for products and "let", but may be difficult for "map". What makes "map" so difficult? 
+This approach seems to work well for products and "let", but may be difficult for "map". What makes "map" so difficult? Maybe, an interaction between `Sem` and `DSem` worlds. As, the examples "unit", "pair", and "let" they can be handled independently. 
 
+(2021-10-08) But, wait. What about the `IFqTEU` case? In `IFqTEU`, the treatment of "let" is a bit complicated because its delta translator remembers let-introduced variables only when it is required for. Naively, a transformation between `a` and `b` is written as:
 
+```
+∃a'. (a' < a) × (a' -> b × (∃a''. ∃c. (a'' < a) × (Δa' × a'' × c -> Δb × a'' × c)))
+```
 
+But, the `Δa'` part above prohibits us from factorizing the Δ-translator part as a `DSem a b`. It is true that we can use `Δa` for this part as and extract the Δ-translator as `DSem a b` as: 
 
+```
+type DSem a b = ∃a''. ∃c. (a'' < a) × (Δa × a'' × c -> Δb × a'' × c)))
+```
+
+But, then we are not able to construct `let_ : DSem s a -> DSem (s, a) b -> DSem s b`, because we do not know how to construct `a` value here. 
+
+**Random Thought:** The map API in the current `Sequence.hs` has type
+
+```haskell
+forall s a b. Diff a => IFqTEU s (S a) -> IFqTEU (a ': s) b -> IFqTEU s (S b)
+```
+
+but, things become a bit simpler with the following type. 
+
+```haskell
+forall s a b. Diff a => IFqTEU (a ': s) b -> IFqTEU (S a ': s) (S b)
+```
+
+- [ ] Check this to know what causes the complication most. 
+
+----
+
+Why is it difficult to implement the map API? One answer would be the manipulation of the `C` part; since it belongs to the `Sem` world but not in the `Code` world. 
+
+-----
+
+I realized that, the `Sem a (b ⊗ DSem' a b)` style is bad for the map API, as the cache part and the Δ-translator `DSem a b` depend on `a`, making it hard to store in homogeneous datatypes like `Sequence` itself. However, there is a motivation to keep the cache part, as some operations on data are common to both data and cache. 
+
+Thus, we may focus on the treatment of Γ and C.
 
 # Discussions on Higher-Order APIs
 
