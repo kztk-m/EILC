@@ -1,0 +1,7 @@
+cradle:
+  stack:
+    - path: "src"
+      component: "embedding-ilc:lib"
+  
+    - path: "test"
+      component: "embedding-ilc:test:embedding-ilc-test"
