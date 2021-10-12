@@ -516,7 +516,7 @@ mapF = flip (liftSO2 (Proxy @'[ '[], '[a] ]) mapT)
 mapFE :: forall e a b. (App2 IFq IFqTE e, Diff a) => (e a -> e b) -> e (S a) -> e (S b)
 mapFE = flip (liftSO2 (Proxy @'[ '[], '[a] ]) mapTE)
 
-mapFEU :: forall e a b. (App2 IFq IFqTEU e, Diff a) => (e a -> e b) -> e (S a) -> e (S b)
+mapFEU :: forall e a b. (App2 IFq IFqTEU e, Diff a, Diff b) => (e a -> e b) -> e (S a) -> e (S b)
 mapFEU = flip (liftSO2 (Proxy @'[ '[], '[a] ]) mapTEU)
 
 
@@ -558,118 +558,207 @@ type MapCEU a cs1 cs2 us2 =
 --    @+ 'NE ('NEOne (Seq.Seq (Conn Identity cs2)))
     @+ 'NE ('NEOne (Seq (PairIfUsed a us2 cs2)))
 
+type MapCEU' a us cs = 'NE ('NEOne (Seq (PairIfUsed a us cs)))
 
-mapTEU :: forall s a b. Diff a => IFqTEU s (S a) -> IFqTEU (a ': s) b -> IFqTEU s (S b)
-mapTEU (IFqTEU tenv (sh1 :: Conn Proxy cs1) (u1 :: Env SBool f_us1) f1 (ut1 :: Env SBool tr_us1) tr1)
-       (IFqTEU _    (sh2 :: Conn Proxy cs2) (u2 :: Env SBool f_us2) f2 (ut2 :: Env SBool tr_us2) tr2)
-  = IFqTEU tenv sh f_u f u tr
+mapTEU' :: forall s a b. Diff a => IFqTEU (a ': s) b -> IFqTEU (S a ': s) (S b) 
+mapTEU' (IFqTEU (ECons _ tenv) (sh ::Conn Proxy cs) (u :: Env SBool f_us) f (ut :: Env SBool tr_us) tr) 
+  = IFqTEU (ECons Proxy tenv) sh' u' f' ut' tr' 
   where
-    sh :: Conn Proxy (MapCEU a cs1 cs2 tr_us2)
-    sh = joinConn sh1 shMap
-
-    shMap :: Conn Proxy ('NE ('NEOne (Seq (PairIfUsed a tr_us2 cs2))))
-    shMap = CNE (COne (Proxy @(Seq (PairIfUsed a tr_us2 cs2))))
-
-    -- u    :: Env SBool (f_us1 `MergeUses` SafeTail f_us2)
-    -- ext1 :: RearrEnv s (f_us1 `MergeUses` SafeTail f_us2) f_us1
-    -- ext2 :: RearrEnv s (f_us1 `MergeUses` SafeTail f_us2) (SafeTail f_us2)
+    sh' :: Conn Proxy (MapCEU' a tr_us cs) 
+    sh' = CNE $ COne $ Proxy @(Seq (PairIfUsed a tr_us cs))
 
     tail' :: forall f xs. Env f xs -> Env f (SafeTail xs)
     tail' ENil         = ENil
     tail' (ECons _ xs) = xs
 
-    (f_u, f_ext1, f_ext2)    = mergeTupled u1 (tail' u2) tenv
-    (tr_u, tr_ext1, tr_ext2) = mergeTupled ut1 (tail' ut2) tenv
+    u' :: Env SBool ('True ': SafeTail f_us)
+    u' = ECons STrue (tail' u) 
 
-    (u, extf, extt) = mergeTupled (tail' u2) tr_u tenv
+    ut' :: Env SBool ('False ': MergeUses (SafeTail f_us) (SafeTail tr_us)) 
+    ut' = ECons SFalse ut0 
 
-    h :: Env PackedCode (Extr s (SafeTail f_us2)) -> Code (a -> (b, PairIfUsed a tr_us2 cs2))
-    h env = case ut2 of
-      ENil           -> h0 env
-      ECons SFalse _ -> h0 env
-      ECons STrue _  -> [|| trackInputInC $$(h0 env) ||]
+    (ut0, extF, extT) = mergeTupled (tail' u) (tail' ut) tenv 
 
-    h0 :: Env PackedCode (Extr s (SafeTail f_us2)) -> Code (a -> (b, EncCS cs2))
-    h0 env = [||
-        \a -> $$( runCodeC (f2 (extendEnv tenv u2 (PackedCode [|| a ||]) env)) $ \(b, c') -> [|| ($$b, $$(conn2cenv c')) ||])
-      ||]
+    f' ::  
+      Env PackedCode (S a : Extr s (SafeTail f_us))
+      -> CodeC (Code (S b), Conn PackedCode (MapCEU' a tr_us cs))
+    f' (ECons (PackedCode as) env) = CodeC $ \k -> 
+        [|| let (bs, cs) = Seq.unzip $ fmap $$(h env) (unS $$as)
+            in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||])) ||]
 
+    h :: Env PackedCode (Extr s (SafeTail f_us)) -> Code (a -> (b, PairIfUsed a tr_us cs))
+    h = case ut of 
+      ENil           -> h0 
+      ECons SFalse _ -> h0 
+      ECons STrue  _ -> \env -> [|| trackInputInC $$(h0 env) ||]
+      where
+        h0 :: Env PackedCode (Extr s (SafeTail f_us)) -> Code (a -> (b, EncCS cs))
+        h0 env = [|| \a -> $$(
+                      toCode $ do 
+                        (b, c') <- f (extendEnv tenv u (PackedCode [|| a ||]) env)
+                        return [|| ($$b , $$(conn2cenv c')) ||]
+                    )  
+                  ||]
 
-    trh ::
-         Env PackedCode      (Extr s (SafeTail f_us2 `MergeUses` (tr_us1 `MergeUses` SafeTail tr_us2)))
-      -> Env PackedCodeDelta (Extr s (f_us1 `MergeUses` SafeTail f_us2))
-      -> Conn Proxy cs2
-      -> Code (Bool -> Delta a -> PairIfUsed a tr_us2 cs2 -> (Delta b, PairIfUsed a tr_us2 cs2))
-    trh env denv pcs =
-      case ut2 of
-        ENil ->
+    tr' :: 
+      Env PackedCode (Extr s (MergeUses (SafeTail f_us) (SafeTail tr_us)))
+      -> Env PackedCodeDelta (S a : Extr s (SafeTail f_us))
+      -> Conn PackedCode (MapCEU' a tr_us cs)
+      -> CodeC (Code (Delta (S b)),
+                Conn PackedCode (MapCEU' a tr_us cs))
+    tr' env (ECons (PackedCodeDelta das) denv) (CNE (COne (PackedCode c))) = do 
+      let fenv = rearrEnv extF env 
+      let trenv = rearrEnv extT env 
+      (dbs, c' :: Code (Seq (PairIfUsed a tr_us cs))) <- CodeC $ \k -> [||
+          let fElem  = $$(h fenv)
+              trElem = $$(trh trenv denv sh)
+              (dbs, c') = mapTr fElem trElem $$c $$das
+          in $$(k ([|| dbs ||], [|| c' ||]))
+        ||]
+      return (dbs, CNE $ COne $ PackedCode c') 
+
+    trh
+      :: Env PackedCode (Extr s (SafeTail tr_us))
+         -> Env PackedCodeDelta (Extr s (SafeTail f_us))
+         -> Conn Proxy cs
+         -> Code (Bool
+                  -> Delta a
+                  -> PairIfUsed a tr_us cs
+                  -> (Delta b, PairIfUsed a tr_us cs))
+    trh trenv denv pcs = case ut of
+      ENil -> 
           [|| \_ da c ->
             $$(cenv2conn pcs [|| c ||] $ \cs ->
-              runCodeC (tr2 (extractingByNilIsNil $ ECons Proxy tenv) (extendEnv tenv u2 (PackedCodeDelta [|| da ||]) $ rearrEnv f_ext2  denv) cs) $ \(db, cs') -> [|| ($$db, $$(conn2cenv cs')) ||]) ||]
-        ECons SFalse _ ->
+              runCodeC (tr (extractingByNilIsNil $ ECons Proxy tenv) (extendEnv tenv u (PackedCodeDelta [|| da ||]) denv) cs) $ \(db, cs') -> [|| ($$db, $$(conn2cenv cs')) ||]) ||]
+      ECons SFalse _ ->
           [|| \b da c ->
             $$(cenv2conn pcs [|| c ||] $ \cs ->
-              let -- denv' :: Env PackedCodeDelta (Extr s ((f_us1 `MergeUses` SafeTail f_us2) `MergeUses` (tr_us1 `MergeUses` SafeTail tr_us2)))
-                  denv' = mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
-              in runCodeC (tr2 (rearrEnv tr_ext2 $ rearrEnv extt env) (extendEnv tenv u2 (PackedCodeDelta [|| da ||]) $ rearrEnv f_ext2 denv') cs) $ \(db, cs') -> [|| ($$db, $$(conn2cenv cs')) ||]) ||]
-        ECons STrue _ ->
+              let denv' = mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
+              in runCodeC (tr trenv (extendEnv tenv u (PackedCodeDelta [|| da ||]) denv') cs) $ \(db, cs') -> [|| ($$db, $$(conn2cenv cs')) ||]) ||]
+      ECons STrue _ ->
           [|| \b da (a, c) ->
             $$(cenv2conn pcs [|| c ||] $ \cs ->
               let denv' = mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
-              in runCodeC (tr2 (extendEnv tenv ut2 (PackedCode [|| a ||]) $ rearrEnv tr_ext2 $ rearrEnv extt env) (extendEnv tenv u2 (PackedCodeDelta [|| da ||]) $ rearrEnv f_ext2 denv') cs) $ \(db, cs') ->
+              in runCodeC (tr (extendEnv tenv ut (PackedCode [|| a ||]) trenv) (extendEnv tenv u (PackedCodeDelta [|| da ||]) denv') cs) $ \(db, cs') ->
                 [|| ($$db, (a /+ da, $$(conn2cenv cs') )) ||])
           ||]
 
-    f ::
-      Env PackedCode (Extr s (f_us1 `MergeUses` SafeTail f_us2))
-      -> CodeC (Code (S b), Conn PackedCode (MapCEU a cs1 cs2 tr_us2))
-    f env = do
-      (as, c1) <- f1 (rearrEnv f_ext1 env)
-      (bs, c2) <- CodeC $ \k ->
-        [|| let (bs, cs) = Seq.unzip $ fmap $$(h $ rearrEnv f_ext2 env) (unS $$as)
-            in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||])) ||]
-      return (bs, joinConn c1 c2)
-      -- case u2 of
-      --   ENil -> do
-      --     (bs, c2) <- CodeC $ \k ->
-      --       [|| let (bs, cs) = Seq.unzip $ fmap $$(h env) (unS $$as)
-      --           in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||])) ||]
-      --     return (bs, joinConn c1 c2)
-      --   ECons SFalse _ -> do
-      --     (bs, c2) <- CodeC $ \k ->
-      --       [|| let (bs, cs) = Seq.unzip $ fmap $$(h env) (unS $$as)
-      --           in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||])) ||]
-      --     return (bs, joinConn c1 c2)
-      --   ECons STrue _ -> do
-      --     (bs, c2) <- CodeC $ \k ->
-      --       [|| let (bs, cs) = Seq.unzip $ fmap (trackInputInC $$(h env)) (unS $$as)
-      --           in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||])) ||]
-      --     return (bs, joinConn c1 c2)
 
-    tr ::
-         Env PackedCode      (Extr s (SafeTail f_us2 `MergeUses` (tr_us1 `MergeUses` SafeTail tr_us2)))
-      -> Env PackedCodeDelta (Extr s (f_us1 `MergeUses` SafeTail f_us2))
-      -> Conn PackedCode (MapCEU a cs1 cs2 tr_us2)
-      -> CodeC (Code (Delta (S b)), Conn PackedCode (MapCEU a cs1 cs2 tr_us2))
-    tr env denv c0 | (c1, CNE (COne (PackedCode c2))) <- decompConn (isNone sh1) (isNone shMap) c0 = do
-      -- FIXME: Implements various optimizations
-      -- For example, if we know that tail' u2 is empty, meaning that f of "map f" is closed. Then, we need not
-      -- update the "complement' in mapTr. More generally, we do not need to perform such computation if the changes to
-      -- the variables used in f are all empty. But, the latter involves run-time checking.
-      --
-      -- Also, we even need not keep Seq (PairIfUsed a tr_us2 cs2) part, if we know both of (1) tr_us2 is ENil or ECons False _ and (2) cs2 is empty. But,
-      -- such a sitatuion would be quite rare, because it means that map is used as map (\_ -> e) with closed e).
-      let fenv  = rearrEnv extf env
-      let fdenv = rearrEnv f_ext2 denv
-      (das, c1') <- tr1 (rearrEnv tr_ext1 $ rearrEnv extt env) (rearrEnv f_ext1 denv) c1
-      fenv' <- mkLetEnv $ zipWithEnv (\(PackedCode a) (PackedCodeDelta da) -> PackedCode [|| $$a /+ $$da ||]) fenv fdenv
-      (dbs, c2' :: Code (Seq (PairIfUsed a tr_us2 cs2))) <- CodeC $ \k -> [||
-          let fElem  = $$(h fenv')
-              trElem = $$(trh env denv sh2)
-              (dbs, cs2') = mapTr fElem trElem $$c2 $$das
-          in $$(k ([|| dbs ||], [|| cs2' ||]))
-        ||]
-      return (dbs, joinConn c1' (CNE (COne (PackedCode c2'))))
+
+
+mapTEU :: forall s a b. (Diff a, Diff b, AllIn s Diff) => IFqTEU s (S a) -> IFqTEU (a ': s) b -> IFqTEU s (S b)
+mapTEU e1 e2 = 
+  letTerm e1 (mapTEU' e2) 
+-- mapTEU (IFqTEU tenv (sh1 :: Conn Proxy cs1) (u1 :: Env SBool f_us1) f1 (ut1 :: Env SBool tr_us1) tr1)
+--        (IFqTEU _    (sh2 :: Conn Proxy cs2) (u2 :: Env SBool f_us2) f2 (ut2 :: Env SBool tr_us2) tr2)
+--   = IFqTEU tenv sh f_u f u tr
+--   where
+--     sh :: Conn Proxy (MapCEU a cs1 cs2 tr_us2)
+--     sh = joinConn sh1 shMap
+
+--     shMap :: Conn Proxy ('NE ('NEOne (Seq (PairIfUsed a tr_us2 cs2))))
+--     shMap = CNE (COne (Proxy @(Seq (PairIfUsed a tr_us2 cs2))))
+
+--     -- u    :: Env SBool (f_us1 `MergeUses` SafeTail f_us2)
+--     -- ext1 :: RearrEnv s (f_us1 `MergeUses` SafeTail f_us2) f_us1
+--     -- ext2 :: RearrEnv s (f_us1 `MergeUses` SafeTail f_us2) (SafeTail f_us2)
+
+--     tail' :: forall f xs. Env f xs -> Env f (SafeTail xs)
+--     tail' ENil         = ENil
+--     tail' (ECons _ xs) = xs
+
+--     (f_u, f_ext1, f_ext2)    = mergeTupled u1 (tail' u2) tenv
+--     (tr_u, tr_ext1, tr_ext2) = mergeTupled ut1 (tail' ut2) tenv
+
+--     (u, extf, extt) = mergeTupled (tail' u2) tr_u tenv
+
+--     h :: Env PackedCode (Extr s (SafeTail f_us2)) -> Code (a -> (b, PairIfUsed a tr_us2 cs2))
+--     h env = case ut2 of
+--       ENil           -> h0 env
+--       ECons SFalse _ -> h0 env
+--       ECons STrue _  -> [|| trackInputInC $$(h0 env) ||]
+
+--     h0 :: Env PackedCode (Extr s (SafeTail f_us2)) -> Code (a -> (b, EncCS cs2))
+--     h0 env = [||
+--         \a -> $$( runCodeC (f2 (extendEnv tenv u2 (PackedCode [|| a ||]) env)) $ \(b, c') -> [|| ($$b, $$(conn2cenv c')) ||])
+--       ||]
+
+
+--     trh ::
+--          Env PackedCode      (Extr s (SafeTail f_us2 `MergeUses` (tr_us1 `MergeUses` SafeTail tr_us2)))
+--       -> Env PackedCodeDelta (Extr s (f_us1 `MergeUses` SafeTail f_us2))
+--       -> Conn Proxy cs2
+--       -> Code (Bool -> Delta a -> PairIfUsed a tr_us2 cs2 -> (Delta b, PairIfUsed a tr_us2 cs2))
+--     trh env denv pcs =
+--       case ut2 of
+--         ENil ->
+--           [|| \_ da c ->
+--             $$(cenv2conn pcs [|| c ||] $ \cs ->
+--               runCodeC (tr2 (extractingByNilIsNil $ ECons Proxy tenv) (extendEnv tenv u2 (PackedCodeDelta [|| da ||]) $ rearrEnv f_ext2  denv) cs) $ \(db, cs') -> [|| ($$db, $$(conn2cenv cs')) ||]) ||]
+--         ECons SFalse _ ->
+--           [|| \b da c ->
+--             $$(cenv2conn pcs [|| c ||] $ \cs ->
+--               let -- denv' :: Env PackedCodeDelta (Extr s ((f_us1 `MergeUses` SafeTail f_us2) `MergeUses` (tr_us1 `MergeUses` SafeTail tr_us2)))
+--                   denv' = mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
+--               in runCodeC (tr2 (rearrEnv tr_ext2 $ rearrEnv extt env) (extendEnv tenv u2 (PackedCodeDelta [|| da ||]) $ rearrEnv f_ext2 denv') cs) $ \(db, cs') -> [|| ($$db, $$(conn2cenv cs')) ||]) ||]
+--         ECons STrue _ ->
+--           [|| \b da (a, c) ->
+--             $$(cenv2conn pcs [|| c ||] $ \cs ->
+--               let denv' = mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
+--               in runCodeC (tr2 (extendEnv tenv ut2 (PackedCode [|| a ||]) $ rearrEnv tr_ext2 $ rearrEnv extt env) (extendEnv tenv u2 (PackedCodeDelta [|| da ||]) $ rearrEnv f_ext2 denv') cs) $ \(db, cs') ->
+--                 [|| ($$db, (a /+ da, $$(conn2cenv cs') )) ||])
+--           ||]
+
+--     f ::
+--       Env PackedCode (Extr s (f_us1 `MergeUses` SafeTail f_us2))
+--       -> CodeC (Code (S b), Conn PackedCode (MapCEU a cs1 cs2 tr_us2))
+--     f env = do
+--       (as, c1) <- f1 (rearrEnv f_ext1 env)
+--       (bs, c2) <- CodeC $ \k ->
+--         [|| let (bs, cs) = Seq.unzip $ fmap $$(h $ rearrEnv f_ext2 env) (unS $$as)
+--             in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||])) ||]
+--       return (bs, joinConn c1 c2)
+--       -- case u2 of
+--       --   ENil -> do
+--       --     (bs, c2) <- CodeC $ \k ->
+--       --       [|| let (bs, cs) = Seq.unzip $ fmap $$(h env) (unS $$as)
+--       --           in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||])) ||]
+--       --     return (bs, joinConn c1 c2)
+--       --   ECons SFalse _ -> do
+--       --     (bs, c2) <- CodeC $ \k ->
+--       --       [|| let (bs, cs) = Seq.unzip $ fmap $$(h env) (unS $$as)
+--       --           in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||])) ||]
+--       --     return (bs, joinConn c1 c2)
+--       --   ECons STrue _ -> do
+--       --     (bs, c2) <- CodeC $ \k ->
+--       --       [|| let (bs, cs) = Seq.unzip $ fmap (trackInputInC $$(h env)) (unS $$as)
+--       --           in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||])) ||]
+--       --     return (bs, joinConn c1 c2)
+
+--     tr ::
+--          Env PackedCode      (Extr s (SafeTail f_us2 `MergeUses` (tr_us1 `MergeUses` SafeTail tr_us2)))
+--       -> Env PackedCodeDelta (Extr s (f_us1 `MergeUses` SafeTail f_us2))
+--       -> Conn PackedCode (MapCEU a cs1 cs2 tr_us2)
+--       -> CodeC (Code (Delta (S b)), Conn PackedCode (MapCEU a cs1 cs2 tr_us2))
+--     tr env denv c0 | (c1, CNE (COne (PackedCode c2))) <- decompConn (isNone sh1) (isNone shMap) c0 = do
+--       -- FIXME: Implements various optimizations
+--       -- For example, if we know that tail' u2 is empty, meaning that f of "map f" is closed. Then, we need not
+--       -- update the "complement' in mapTr. More generally, we do not need to perform such computation if the changes to
+--       -- the variables used in f are all empty. But, the latter involves run-time checking.
+--       --
+--       -- Also, we even need not keep Seq (PairIfUsed a tr_us2 cs2) part, if we know both of (1) tr_us2 is ENil or ECons False _ and (2) cs2 is empty. But,
+--       -- such a sitatuion would be quite rare, because it means that map is used as map (\_ -> e) with closed e).
+--       let fenv  = rearrEnv extf env
+--       let fdenv = rearrEnv f_ext2 denv
+--       (das, c1') <- tr1 (rearrEnv tr_ext1 $ rearrEnv extt env) (rearrEnv f_ext1 denv) c1
+-- --      fenv' <- mkLetEnv $ zipWithEnv (\(PackedCode a) (PackedCodeDelta da) -> PackedCode [|| $$a /+ $$da ||]) fenv fdenv
+--       (dbs, c2' :: Code (Seq (PairIfUsed a tr_us2 cs2))) <- CodeC $ \k -> [||
+--           let fElem  = $$(h fenv)
+--               trElem = $$(trh env denv sh2)
+--               (dbs, cs2') = mapTr fElem trElem $$c2 $$das
+--           in $$(k ([|| dbs ||], [|| cs2' ||]))
+--         ||]
+--       return (dbs, joinConn c1' (CNE (COne (PackedCode c2'))))
 
 
 -- To avoid errors caused by "stack repl"
