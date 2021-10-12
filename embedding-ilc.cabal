@@ -32,6 +32,7 @@ common deps
 library
     import: deps 
     exposed-modules:  
+        Data.Code 
         Data.Env        
         Data.Delta 
         Data.Incrementalized
@@ -39,7 +40,7 @@ library
         Data.IFqT 
         Data.IFqTE 
         Data.IFqTEU 
-        Langauge.Unembedding        
+        Language.Unembedding        
         EILC
 
     -- Modules included in this library but not exported.
