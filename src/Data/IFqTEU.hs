@@ -227,8 +227,9 @@ instance Term IFq IFqTEU where
         ECons STrue _  ->
           case decompConn (IsNoneFalse :: IsNone ('NE ('NEOne a))) (isNone sh) cc of
             (CNE (COne (PackedCode a)), c) -> do
-              (db, c') <- tr (ECons (PackedCode a) ENil) (mkEnv u $ PackedCodeDelta da) c
-              return (db, joinConn (CNE (COne (PackedCode [|| $$a /+ $$da ||]))) c')
+              a' <- mkLet [|| $$a /+ $$da ||]
+              (db, c') <- tr (ECons (PackedCode a') ENil) (mkEnv u $ PackedCodeDelta da) c
+              return (db, joinConn (CNE (COne (PackedCode a'))) c')
 
 
 type family CSing (cs :: Tree k) (as :: [k]) (bs :: [Bool]) :: Tree k where
@@ -319,8 +320,8 @@ instance LetTerm IFq IFqTEU where
           let (CNE (COne (PackedCode a)), cc) = decompConn (IsNoneFalse :: IsNone ('NE ('NEOne a))) (isNone sh12) c0
           let (c1, c2) = decompConn (isNone sh1) (isNone sh2) cc
           (da, c1') <- tr1 (rearrEnv extt1 env) (rearrEnv ext1 denv) c1
-          (db, c2') <- tr2 (ext (PackedCode a) env) (extd (PackedCodeDelta da) denv) c2
           a' <- mkLet [|| $$a /+ $$da ||]
+          (db, c2') <- tr2 (ext (PackedCode a') env) (extd (PackedCodeDelta da) denv) c2
           return (db, joinConn (CNE (COne (PackedCode a')))$ joinConn c1' c2')
 
         where
