@@ -149,6 +149,8 @@ I realized that, the `Sem a (b ⊗ DSem' a b)` style is bad for the map API, as 
 
 Thus, we may focus on the treatment of Γ and C.
 
+(2021-10-12) Now I feel that the map API is reasonably complex. 
+
 # Discussions on Higher-Order APIs
 
 A interesting problem comes form Giarrusso et al.'s paper: What happens if APIs contains higher-orderness? 
