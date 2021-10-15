@@ -49,7 +49,8 @@ headEnv (ECons a _) = a
 tailEnv :: Env f (a ': as) -> Env f as
 tailEnv (ECons _ r) = r
 
-
+headTailEnv :: Env f (a ': as) -> (f a, Env f as)
+headTailEnv (ECons a as) = (a, as)
 
 zipWithEnv :: (forall a. f a -> g a -> h a) -> Env f as -> Env g as -> Env h as
 zipWithEnv _ ENil ENil                 = ENil

@@ -5,12 +5,13 @@
 {-# LANGUAGE TypeFamilies      #-}
 module Data.Incrementalized where
 
-import           Data.Delta
-
-import           Data.Code
+import           Data.Code        (Code)
+import           Data.Delta       (AtomicDelta, Delta, Diff (..), iterTr,
+                                   iterTrStateless)
+import           Data.Interaction (Interaction)
 
 class IncrementalizedQ cat where
-  {-# MINIMAL (fromStateless|fromStatelessAtomic), (fromFunctions|fromFunctionsAtomic) #-}
+  {-# MINIMAL (fromStateless|fromStatelessAtomic), (fromFunctions|fromFunctionsAtomic), compile #-}
 
   fromStateless ::
     (Code a  -> Code b)
@@ -58,6 +59,9 @@ class IncrementalizedQ cat where
     -> cat a b
   fromFunctionsAtomic f df =
     fromFunctions f [|| iterTr $$df ||]
+
+  compile ::
+    cat a b -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
 
 
 

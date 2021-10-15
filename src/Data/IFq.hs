@@ -37,12 +37,16 @@ import           Data.Functor.Identity (Identity (..))
 import           Data.Kind             (Type)
 import           Prelude               hiding (id, (.))
 
-import           Data.Code
+
 import           Data.Coerce           (coerce)
+import           Data.Proxy            (Proxy (..))
+
+
+import           Data.Code
 import           Data.Delta
 import           Data.Env
 import           Data.Incrementalized
-import           Data.Proxy            (Proxy (..))
+import           Data.Interaction
 import           Language.Unembedding
 
 data NETree a = NEOne a | NEJoin !(NETree a) !(NETree a)
@@ -215,6 +219,7 @@ instance IncrementalizedQ IFq where
         (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
           [|| let (db, c') = $$df $$da $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
 
+  compile = runIFq
 
 multIFq :: IFq s a -> IFq s b -> IFq s (a, b)
 multIFq (IFq sh1 f1 tr1) (IFq sh2 f2 tr2) = IFq (joinConn sh1 sh2) f tr
@@ -231,14 +236,6 @@ multIFq (IFq sh1 f1 tr1) (IFq sh2 f2 tr2) = IFq (joinConn sh1 sh2) f tr
       r <- mkLet [|| pairDelta $$da $$db ||]
       return ( r, joinConn c1' c2' )
 
-
-newtype Interaction a b = Interaction { runInteraction :: a -> (b, Interaction a b) }
-
-iterations :: Interaction a b -> [a] -> [b]
-iterations _ []       = []
-iterations i (a : as) =
-  let (b, i') = runInteraction i a
-  in b : iterations i' as
 
 
 unCNE :: Conn f ('NE cs) -> NEConn f cs

@@ -121,9 +121,6 @@ instance (Diff a, Diff b) => Diff (a, b) where
   applyAtomicDelta (a, b) (ADFst da) = (applyAtomicDelta a da, b)
   applyAtomicDelta (a, b) (ADSnd db) = (a, applyAtomicDelta b db)
 
-
--- FIXME: use Hughes lists or something similar
--- type Delta a = [AtomicDelta a]
 type Delta a = FreeMonoidF (AtomicDelta a)
 
 

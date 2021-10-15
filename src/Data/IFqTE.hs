@@ -30,6 +30,7 @@ data IFqTE as b =
                    (Conn Proxy cs)
                    (Env PackedCode as -> CodeC (Code b, Conn PackedCode cs))
                    (Env PackedCode as -> Env PackedCodeDelta as -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
+                    -- ^ should be updated
 
 instance Term IFq IFqTE where
   mapTerm (IFq sh2 f2 tr2) (IFqTE tenv sh1 f1 tr1) = IFqTE tenv (joinConn sh1 sh2) f tr
@@ -85,8 +86,9 @@ instance Term IFq IFqTE where
              -> CodeC (Code (Delta b), Conn PackedCode (Join ('NE ('NEOne a)) cs))
       tr' da cc | (c0, c) <- decompConn (IsNoneFalse :: IsNone ('NE ('NEOne a))) (isNone i) cc = do
         let CNE (COne (PackedCode a)) = c0
-        (db, c') <- tr (ECons (PackedCode a) ENil) (ECons (PackedCodeDelta da) ENil) c
-        return (db, joinConn (CNE (COne (PackedCode [|| $$a /+ $$da ||]))) c')
+        a' <- mkLet [|| $$a /+ $$da ||]
+        (db, c') <- tr (ECons (PackedCode a') ENil) (ECons (PackedCodeDelta da) ENil) c
+        return (db, joinConn (CNE (COne (PackedCode a'))) c')
 
 instance LetTerm IFq IFqTE where
   letTerm :: forall as a b. Diff a => IFqTE as a -> IFqTE (a ': as) b -> IFqTE as b
@@ -112,5 +114,6 @@ instance LetTerm IFq IFqTE where
         let CNE (COne (PackedCode a)) = cA
         (da, c1') <- tr1 s ds c1
         dv <- mkLet da
-        (db, c2') <- tr2 (ECons (PackedCode a) s) (ECons (PackedCodeDelta dv) ds) c2
-        return (db, joinConn (CNE (COne (PackedCode [|| $$a /+ $$dv ||]))) (joinConn c1' c2'))
+        a' <- mkLet [|| $$a /+ $$dv ||]
+        (db, c2') <- tr2 (ECons (PackedCode a') s) (ECons (PackedCodeDelta dv) ds) c2
+        return (db, joinConn (CNE (COne (PackedCode a'))) (joinConn c1' c2'))
