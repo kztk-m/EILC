@@ -96,7 +96,8 @@ decompConn IsNoneFalse IsNoneFalse (CNE (CJoin x y)) = (CNE x, CNE y)
 data IFt a b = forall cs. IFt (IsNone cs) (a -> (b, Conn Identity cs)) (AtomicDelta a -> Conn Identity cs -> (Delta b, Conn Identity cs))
 
 instance CategoryK IFt where
-  id = IFt IsNoneTrue (\a -> (a, CNone)) (\da c -> (injMonoid da, c))
+  type K IFt = HasAtomicDelta
+  id = IFt IsNoneTrue (\a -> (a, CNone)) (\da c -> (injDelta da, c))
 
   IFt isNone2 f2 tr2 . IFt isNone1 f1 tr1 = IFt (isNoneAnd isNone1 isNone2) f tr
     where

@@ -27,7 +27,8 @@ instance Monad CodeC where
 
 mkLet :: Code a -> CodeC (Code a)
 mkLet e = CodeC $ \k ->
-  [|| let v = $$( e ) in $$(k [|| v ||]) ||]
+  -- Used _v to avoid "unused ..." errors.
+  [|| let _v = $$( e ) in $$(k [|| _v ||]) ||]
 
 newtype PackedCode a = PackedCode { getCode :: Code a }
 

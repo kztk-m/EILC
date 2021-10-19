@@ -3,41 +3,46 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
 
-{-# OPTIONS_GHC -Wno-orphans #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE QuantifiedConstraints      #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE UndecidableInstances       #-}
 {-# LANGUAGE UndecidableSuperClasses    #-}
-{-# LANGUAGE ViewPatterns               #-}
 
 module Examples.Average where
 
 import           EILC
 import           Language.Unembedding
 
-import           Data.Coerce          (coerce)
-import           Data.Semigroup       (Sum (..))
 
 import           Data.Incrementalized
 import           Data.Proxy           (Proxy (..))
 
 newtype Bag a = Bag [a] deriving (Monoid, Semigroup)
 
-newtype instance AtomicDelta (Bag a) = ADBag (Bag a) -- only insertions are considered
+-- newtype instance AtomicDelta (Bag a) = ADBag (Bag a) -- only insertions are considered
+
+-- instance Diff (Bag a) where
+--   applyAtomicDelta (Bag xs) (coerce -> Bag ys) = Bag (ys ++ xs)
+
+newtype instance Delta (Bag a) = DBag (Bag a)
+  deriving (Semigroup, Monoid)
 
 instance Diff (Bag a) where
-  applyAtomicDelta (Bag xs) (coerce -> Bag ys) = Bag (ys ++ xs)
+  Bag a /+ (DBag (Bag da)) = Bag (da ++ a)
 
-newtype instance AtomicDelta Int = ADInt (Sum Int) deriving Show
-newtype instance AtomicDelta Double = ADDouble (Sum Double) deriving Show
+  checkEmpty (DBag (Bag da)) = null da
 
-instance Diff Int where
-  applyAtomicDelta n (coerce -> getSum -> m) = n + m
 
-instance Diff Double where
-  applyAtomicDelta n (coerce -> m) = n + m
+-- newtype instance AtomicDelta Int = ADInt (Sum Int) deriving Show
+-- newtype instance AtomicDelta Double = ADDouble (Sum Double) deriving Show
+
+-- instance Diff Int where
+--   applyAtomicDelta n (coerce -> getSum -> m) = n + m
+
+-- instance Diff Double where
+--   applyAtomicDelta n (coerce -> m) = n + m
 
 
 
@@ -105,21 +110,24 @@ ave = \x -> mysum x `mydiv` i2d (len x)
   where
     lenC :: IncrementalizedQ cat => cat (Bag Double) Int
     lenC = fromStateless (\a  -> [|| case $$a of { Bag as -> length as } ||])
-                         (\da -> [|| fmap (\x -> case x of { ADBag (Bag as) -> ADInt (Sum (length as)) }) $$da ||])
+                         (\da -> [|| case $$da of { DBag (Bag as) -> DInt (length as) } ||])
+--                         (\da -> [|| fmap (\x -> case x of { DBag (Bag as) -> DInt (length as) }) $$da ||])
 
     i2dC :: IncrementalizedQ cat => cat Int Double
     i2dC = fromStateless (\a  -> [|| fromIntegral $$a :: Double ||])
-                         (\da -> [|| fmap (\(ADInt x) -> ADDouble (Sum $ fromIntegral $ getSum x)) $$da ||])
+    --                      (\da -> [|| fmap (\(DInt x) -> DDouble (Sum $ fromIntegral $ getSum x)) $$da ||])
+                         (\da -> [|| case $$da of { DInt x -> DDouble (fromIntegral x) } ||])
     -- (\da -> [|| Sum (fromIntegral (getSum $$da) :: Double) ||])
 
     sumC :: IncrementalizedQ cat => cat (Bag Double) Double
     sumC = fromStateless (\a  -> [|| case $$a of { Bag as -> sum as } ||])
-                         (\da -> [|| fmap (\ (ADBag (Bag as)) -> ADDouble (Sum (sum as)) ) $$da ||])
+                         (\da -> [|| case $$da of { DBag (Bag as) -> DDouble (sum as) } ||])
+--                         (\da -> [|| fmap (\ (DBag (Bag as)) -> DDouble (sum as) ) $$da ||])
 --                            (\da -> [|| case $$da of { Bag as' -> Sum (sum as') } ||])
 
     divC :: IncrementalizedQ cat => cat (Double, Double) Double
     divC = fromD (\z -> [|| uncurry (/) $$z ||])
-                 (\z dz -> [|| let {(x, y) = $$z; dx = fstDelta $$dz ; dy = sndDelta $$dz } in injMonoid (ADDouble $ Sum $ (x /+ dx) / (y /+ dy) - x / y) ||])
+                 (\z dz -> [|| let {(x, y) = $$z; dx = fstDelta $$dz ; dy = sndDelta $$dz } in DDouble $ (x /+ dx) / (y /+ dy) - x / y ||])
 --                    (\z dz -> [|| let {(x, y) = $$z ; (dx, dy) = $$dz} in Sum $ (x /+ dx) / (y /+ dy) - x / y ||])
 
     len = lift lenC

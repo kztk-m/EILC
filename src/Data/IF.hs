@@ -1,9 +1,13 @@
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE QuantifiedConstraints     #-}
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE TypeOperators             #-}
+{-# LANGUAGE UndecidableInstances      #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE FlexibleInstances         #-}
 module Data.IF where
 
 import           Data.Delta
@@ -14,6 +18,8 @@ import           Language.Unembedding
 import qualified Unsafe.Coerce         as Unsafe
 
 import           Data.Coerce           (coerce)
+import           Data.Delta            (HasAtomicDelta)
+import           Data.Kind             (Constraint)
 import           Prelude               hiding (id, (.))
 
 -- | Incremtalized function
@@ -33,6 +39,8 @@ data IV a b = forall c. IV !(b, c) !(Delta a -> c -> (Delta b, c))
 --   in (db <> res, c2)
 
 instance CategoryK IF where
+--  type K IF = HasAtomicDelta
+
   id = IF (\a -> (a, ())) (\da c -> (da , c))
 
   IF f2 tr2 . IF f1 tr1 = IF f tr
@@ -56,7 +64,7 @@ prodIF (IF f1 tr1) (IF f2 tr2) = IF f tr
     tr ds (c1 , c2) =
       let (da , c1') = tr1 ds c1
           (db , c2') = tr2 ds c2
-      in ( fmap ADFst da <> fmap ADSnd db , (c1' , c2') )
+      in ( pairDelta da db , (c1' , c2') )
 
 toIF :: Diff a => (a -> b) -> (a -> Delta a -> Delta b) -> IF a b
 toIF f df = IF (\a -> (f a, a)) (\da a -> (df a da, a /+ da))
@@ -84,24 +92,56 @@ data Index f as where
 
 newtype PackedAtomicDelta f a = PackedAtomicDelta { getAtomicDelta :: AtomicDelta (f a) }
 
--- type instance Delta (Env f as) = Env (PackedDelta f) as
-newtype instance AtomicDelta (Env f as) = AtomicDeltaEnv (Index (PackedAtomicDelta f) as)
+
+newtype PackedDelta f a = PackedDelta (Delta (f a))
+
+newtype instance Delta (Env f as) = DeltaEnv { getDeltaEnv :: Env (PackedDelta f) as }
+
+instance AllInFF Delta f as Semigroup => Semigroup (Delta (Env f as)) where
+  DeltaEnv ENil <> DeltaEnv ENil = DeltaEnv ENil
+  DeltaEnv (ECons (PackedDelta da) das) <> DeltaEnv (ECons (PackedDelta da') das') = DeltaEnv (ECons (PackedDelta $ da <> da') $ coerce (DeltaEnv das <> DeltaEnv das'))
+
+
+type family AllInFF f g as c :: Constraint where
+  AllInFF f g '[] c      = ()
+  AllInFF f g (a ': as) c = (c (f (g a)), AllInFF f g as c)
+
+
+type family AllInF f as c :: Constraint where
+  AllInF f '[] c = ()
+  AllInF f (a ': as) c = (c (f a), AllInF f as c)
+instance AllInF f as Diff => Diff (Env f as) where
+  ENil /+ _                             = ENil
+  ECons a as /+ DeltaEnv (ECons (PackedDelta da) das) = ECons (a /+ da) (as /+ DeltaEnv das)
+
+instance AllInF f as HasAtomicDelta => HasAtomicDelta (Env f as) where
+  newtype instance AtomicDelta (Env f as) = AtomicDeltaEnv { getAtomicDeltaEnv :: Index (PackedAtomicDelta f) as }
+
+  injDelta (AtomicDeltaEnv (IndexZ (PackedAtomicDelta da))) = DeltaEnv (ECons (PackedDelta $ injDelta da) mempty)
+  injDelta (AtomicDeltaEnv (IndexS x)) = DeltaEnv (ECons (PackedDelta mempty) (getDeltaEnv $ injDelta $ AtomicDeltaEnv x))
+
+  monoidMap f (DeltaEnv ENil) = mempty
+  monoidMap f (DeltaEnv (ECons (PackedDelta da) das)) = monoidMap (f . AtomicDeltaEnv . IndexZ . PackedAtomicDelta) da <> monoidMap (f . AtomicDeltaEnv . IndexS . getAtomicDeltaEnv) (DeltaEnv das)
+
+
 
 
 tailIF :: IF (Env Identity (a : as)) (Env Identity as)
 tailIF = IF (\(ECons _ r) -> (r, ()))
 --            (iterTr $ \(ECons _ dr) _ -> (dr, ()))
-            (iterTr $ \(AtomicDeltaEnv x) _ ->
-              case x of
-                IndexZ _  -> (mempty, ())
-                IndexS am -> (pure (AtomicDeltaEnv am), ()))
+            (\(DeltaEnv (ECons _ ds)) _ -> (DeltaEnv ds, ()))
+            -- (iterTr $ \(AtomicDeltaEnv x) _ ->
+            --   case x of
+            --     IndexZ _  -> (mempty, ())
+            --     IndexS am -> (pure (AtomicDeltaEnv am), ()))
 
 headIF :: IF (Env Identity (a : as)) a
 headIF = IF (\(ECons a _) -> (coerce a, ()))
 --            (iterTr $ \(ECons da _) _ -> (coerce da, ()))
-            (iterTr $ \(AtomicDeltaEnv x) _ -> case x of
-              IndexZ da -> (pure $ runADIdentity $ getAtomicDelta da , ())
-              IndexS _  -> (mempty, ()))
+            (\(DeltaEnv (ECons (PackedDelta (IdentityDelta da)) _)) _ -> (da, ()))
+            -- (iterTr $ \(AtomicDeltaEnv x) _ -> case x of
+            --   IndexZ da -> (pure $ runADIdentity $ getAtomicDelta da , ())
+            --   IndexS _  -> (mempty, ()))
 
 
 newtype UnembIncr b = UnembIncr { runUnembIncr :: forall as. Env Proxy as -> IF (Env Identity as) b  }
@@ -127,18 +167,18 @@ instance Incr UnembIncr where
       toEnv = IF (\(a, as) -> (ECons (Identity a) as, ()))
                  -- (\(da, das) _ -> (ECons (PackedDelta da) das, ()))
                  (iterTr $ \x _ -> case x of
-                   ADFst da  -> (pure $ AtomicDeltaEnv $ IndexZ (PackedAtomicDelta $ ADIdentity da), ())
-                   ADSnd das -> (pure $ AtomicDeltaEnv $ IndexS $ coerce das, ()))
+                   ADFst da  -> (injDelta  $ AtomicDeltaEnv $ IndexZ (PackedAtomicDelta $ ADIdentity da), ())
+                   ADSnd das -> (injDelta $ AtomicDeltaEnv $ IndexS $ coerce das, ()))
 
   pairI (UnembIncr x) (UnembIncr y) = UnembIncr $ \tenv -> prodIF (x tenv) (y tenv)
 
-runIncrMono :: (UnembIncr a -> UnembIncr b) -> IF a b
+runIncrMono :: (HasAtomicDelta a, HasAtomicDelta b) => (UnembIncr a -> UnembIncr b) -> IF a b
 runIncrMono f = runUnembIncr (shareI (UnembIncr $ \(ECons Proxy _) -> Unsafe.unsafeCoerce headIF) f) (ECons Proxy ENil) . singleton
   where
-    singleton :: IF a (Env Identity '[a])
+    singleton :: HasAtomicDelta a => IF a (Env Identity '[a])
     singleton = IF (\a -> (ECons (Identity a) ENil, ()))
 --                   (\da _ -> (ECons (PackedDelta da) ENil, ()))
-                   (iterTr $ \da _ -> (pure $ AtomicDeltaEnv $ IndexZ $ coerce da, ()))
+                   (iterTr $ \da _ -> (injDelta $ AtomicDeltaEnv $ IndexZ $ coerce da, ()))
 
 
 

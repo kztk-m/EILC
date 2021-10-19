@@ -1,4 +1,5 @@
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE KindSignatures    #-}
 {-# LANGUAGE PolyKinds         #-}
 {-# LANGUAGE TemplateHaskell   #-}
@@ -6,8 +7,8 @@
 module Data.Incrementalized where
 
 import           Data.Code        (Code)
-import           Data.Delta       (AtomicDelta, Delta, Diff (..), iterTr,
-                                   iterTrStateless)
+import           Data.Delta       (AtomicDelta, Delta, Diff (..),
+                                   HasAtomicDelta (..), iterTr, iterTrStateless)
 import           Data.Interaction (Interaction)
 
 class IncrementalizedQ cat where
@@ -17,11 +18,19 @@ class IncrementalizedQ cat where
     (Code a  -> Code b)
     -> (Code (Delta a) -> Code (Delta b))
     -> cat a b
+
+  default
+    fromStateless ::
+      (HasAtomicDelta a, Monoid (Delta b))
+      => (Code a  -> Code b)
+      -> (Code (Delta a) -> Code (Delta b))
+      -> cat a b
   fromStateless f df =
-    fromStatelessAtomic f (\ada -> [|| let da = pure $$ada in $$(df [|| da ||]) ||])
+    fromStatelessAtomic f (\ada -> [|| let da = injDelta $$ada in $$(df [|| da ||]) ||])
 
   fromStatelessAtomic ::
-    (Code a  -> Code b)
+    (HasAtomicDelta a, Monoid (Delta b))
+    => (Code a  -> Code b)
     -> (Code (AtomicDelta a) -> Code (Delta b))
     -> cat a b
   fromStatelessAtomic f df =
@@ -37,7 +46,7 @@ class IncrementalizedQ cat where
        [|| \a -> ($$(f [|| a ||]), a) ||]
        [|| \da a -> let db = $$(df [|| a ||] [|| da ||]) in (db, a /+ da) ||]
   fromDAtomic ::
-    Diff a =>
+    (HasAtomicDelta a, Monoid (Delta b)) =>
     (Code a  -> Code b)
     -> (Code a -> Code (AtomicDelta a) -> Code (Delta b))
     -> cat a b
@@ -50,11 +59,18 @@ class IncrementalizedQ cat where
     Code (a -> (b , c))
     -> Code (Delta a -> c -> (Delta b, c))
     -> cat a b
+  default
+    fromFunctions ::
+      (HasAtomicDelta a, Monoid (Delta b))
+      => Code (a -> (b , c))
+      -> Code (Delta a -> c -> (Delta b, c))
+      -> cat a b
   fromFunctions f df =
-    fromFunctionsAtomic f [|| $$df . pure ||]
+    fromFunctionsAtomic f [|| $$df . injDelta ||]
 
   fromFunctionsAtomic ::
-    Code (a -> (b , c))
+    (HasAtomicDelta a, Monoid (Delta b))
+    => Code (a -> (b , c))
     -> Code (AtomicDelta a -> c -> (Delta b, c))
     -> cat a b
   fromFunctionsAtomic f df =
