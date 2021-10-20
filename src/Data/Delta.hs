@@ -21,13 +21,26 @@ module Data.Delta where
 --
 -- f <*> x = monoidMap f $ \f' -> monoidMap x $ \x' -> injMonoid (f' a')
 
-import           Data.Coerce           (coerce)
+-- We want to define a class with
+--
+--     injMonoid :: a -> m a
+--     monoidMap :: Monoid n => (a -> n) -> m a -> n
+--     m a is always a monoid
+--
+-- Then, m must be Applicative as
+--
+-- f <*> x = monoidMap f $ \f' -> monoidMap x $ \x' -> injMonoid (f' a')
+import           Data.Coerce           (Coercible, coerce)
 import           Data.Functor.Identity
 import           Data.Kind             (Type)
-import           Data.Monoid           (All (..), Dual (..), Endo (..),
-                                        Sum (..))
+import           Data.Monoid           (Endo (..), Sum (..))
 
 {-# ANN module "HLint: ignore Use tuple-section" #-}
+
+-- Stolen from Data.Functor.Utils (hidden package in base)
+(#.) :: Coercible b c => (b -> c) -> (a -> b) -> (a -> c)
+(#.) _ = coerce
+{-# INLINE (#.) #-}
 
 -- We generally assume that Delta a is a monoid
 data family Delta (a :: Type) :: Type
@@ -37,15 +50,26 @@ class Monoid (Delta a) => Diff a where
   (/+) :: a -> Delta a -> a
 
   default (/+) :: HasAtomicDelta a => a -> Delta a -> a
-  a /+ da = appEndo (getDual (monoidMap (Dual . Endo . flip applyAtomicDelta) da)) a
+  a /+ da = foldl'Delta applyAtomicDelta a da
+  {-# INLINABLE (/+) #-}
 
   -- | Sound check of emptiness
   -- prop> checkEmpty da == True ==> a /+ da == a
   checkEmpty :: Delta a -> Bool
 
   default checkEmpty :: HasAtomicDelta a => Delta a -> Bool
-  checkEmpty da = getAll $ monoidMap (const $ All False) da
+  checkEmpty = foldrDelta (\_ _ -> False) True
+  {-# INLINABLE checkEmpty #-}
 
+-- The following definitions are taken from Data.Foldable
+foldrDelta :: HasAtomicDelta a => (AtomicDelta a -> b -> b) -> b -> Delta a -> b
+foldrDelta f z t = appEndo (monoidMap (Endo #. f) t) z
+{-# INLINE foldrDelta #-}
+
+foldl'Delta :: HasAtomicDelta a => (b -> AtomicDelta a -> b) -> b -> Delta a -> b
+foldl'Delta f z0 xs = foldrDelta f' id xs z0
+      where f' x k z = k $! f z x
+{-# INLINE foldl'Delta #-}
 class Diff a => HasAtomicDelta a where
   data family AtomicDelta a :: Type
 
@@ -155,6 +179,7 @@ instance Diff Int where
   {-# INLINE (/+) #-}
 
   checkEmpty (DInt n) = n == 0
+  {-# INLINE checkEmpty #-}
 
 newtype instance Delta Word = DWord Int
   deriving (Semigroup, Monoid) via (Sum Int)
@@ -166,6 +191,7 @@ instance Diff Word where
   {-# INLINE (/+) #-}
 
   checkEmpty (DWord n) = n == 0
+  {-# INLINE checkEmpty #-}
 
 newtype instance Delta Double = DDouble Double
   deriving (Semigroup, Monoid) via (Sum Double)
@@ -177,6 +203,7 @@ instance Diff Double where
   {-# INLINE (/+) #-}
 
   checkEmpty (DDouble n) = n == 0
+  {-# INLINE checkEmpty #-}
 
 
 -- class (Applicative m, Alternative m, Foldable m) => MonoidF m

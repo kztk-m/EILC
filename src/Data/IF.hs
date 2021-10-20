@@ -1,3 +1,7 @@
+{-
+Currently broken.
+-}
+
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GADTs                     #-}

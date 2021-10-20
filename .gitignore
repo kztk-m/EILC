@@ -3,3 +3,6 @@
 stack.yaml.lock
 *.prof
 *.hp
+
+*.profiterole.html 
+*.profiterole.txt 

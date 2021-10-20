@@ -98,11 +98,11 @@ doBench :: String -> (S Int, S Int) -> [Delta (S Int, S Int)] -> Benchmark
 doBench gname a0 ds =
   env (return (a0, ds)) $ \ ~(a0', ds') ->
     bgroup gname [
-      bench "S"    $ nf (tryScratch dCartesianT a0') ds',
-      bench "T"    $ nf (tryInc dCartesianT a0') ds' ,
-      bench "TE"   $ nf (tryInc dCartesianTE a0') ds' ,
-      bench "TEU"  $ nf (tryInc dCartesianTEU a0') ds' ,
-      bench "F"    $ nf (tryInc dCartesianF a0') ds'
+      -- bench "S"    $ nf (tryScratch dCartesianT a0') ds',
+      -- bench "T"    $ nf (tryInc dCartesianT a0') ds' ,
+      -- bench "TE"   $ nf (tryInc dCartesianTE a0') ds' ,
+      bench "TEU"  $ nf (tryInc dCartesianTEU a0') ds'  -- ,
+--      bench "F"    $ nf (tryInc dCartesianF a0') ds'
     ]
 
 
