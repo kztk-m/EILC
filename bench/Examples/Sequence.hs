@@ -37,12 +37,10 @@ import qualified Data.Sequence         as Seq
 import           EILC
 import           Language.Unembedding
 
-import qualified Data.Foldable         (toList)
+import qualified Data.Foldable         (foldl', toList)
 
 import           Data.Sequence         (Seq)
 import           Data.Typeable         (Proxy (Proxy))
-
-import           Data.Monoid
 
 import           Data.Functor.Identity (Identity (Identity))
 
@@ -87,9 +85,9 @@ instance Foldable JList where
       goNil (JSingleton a)  = f a
       goNil (JAppend j1 j2) = go j1 $! goNil j2
 
-      go JNil r            = r
-      go (JSingleton a)  r = f a <> r
-      go (JAppend j1 j2) r = go j1 $! go j2 r
+      go JNil r             = r
+      go (JSingleton a)  !r = let !b = f a in b <> r
+      go (JAppend j1 j2) !r = go j1 $! go j2 r
 
 instance Show a => Show (JList a) where
   show js = show (Data.Foldable.toList js)
@@ -161,27 +159,27 @@ deriving instance (Show (Delta a), Show a) => Show (AtomicDelta (S a))
 
 
 insSeq :: Int -> Seq.Seq a -> Seq.Seq a -> Seq.Seq a
-insSeq i s' s0 =
-    let (s1, s2) = Seq.splitAt i s0
+insSeq !i !s' !s0 =
+    let !(!s1, !s2) = Seq.splitAt i s0
     in s1 Seq.>< s' Seq.>< s2
 {-# INLINABLE insSeq #-}
 
 delSeq :: Int -> Int -> Seq.Seq a -> Seq.Seq a
-delSeq i n s0 =
-    let (s1, stemp) = Seq.splitAt i s0
-        s2 = Seq.drop n stemp
+delSeq !i !n !s0 =
+    let !(!s1, stemp) = Seq.splitAt i s0
+        !s2 = Seq.drop n stemp
     in s1 Seq.>< s2
 {-# INLINABLE delSeq #-}
 
 repSeq :: Diff a => Int -> Delta a -> Seq.Seq a -> Seq.Seq a
-repSeq i da = Seq.adjust' (/+ da) i
+repSeq !i !da = Seq.adjust' (/+ da) i
 {-# INLINABLE repSeq #-}
 
 rearrSeq :: Int -> Int -> Int -> Seq.Seq a -> Seq.Seq a
-rearrSeq i n j s0 =
-    let (s1, s23) = Seq.splitAt i s0
-        (s2, s3)  = Seq.splitAt n s23
-    in insSeq j s2 (s1 Seq.>< s3)
+rearrSeq !i !n !j !s0 =
+    let !(!s1, s23) = Seq.splitAt i s0
+        !(!s2, !s3) = Seq.splitAt n s23
+    in insSeq j s2 $! (s1 Seq.>< s3)
 {-# INLINABLE rearrSeq #-}
 
 -- APIs
@@ -194,7 +192,7 @@ singletonF = lift singletonC
   where
     singletonC =
       fromStateless (\a -> [|| S (Seq.singleton $! $$a) ||])
-                    (\da -> [|| dsingleton $$da ||])
+                    (\da -> [|| dsingleton $! $$da ||])
       -- ifqFromStatelessA (\a -> [|| S (Seq.singleton $$a) ||])
       --                   (\da -> [|| dsingleton $$da ||])
 {-# INLINABLE singletonF #-}
@@ -219,7 +217,8 @@ s2c (S s0) = fmap (Seq.length . unS) s0
 concatC :: S (S a) -> (S a, ConcatC)
 concatC s0 =
   let !res = Control.Monad.join s0
-  in (res, s2c s0)
+      !c = s2c s0
+  in (res, c)
 
 -- trConcatC :: Delta (S (S a)) -> ConcatC -> (Delta (S a), ConcatC)
 -- trConcatC [] conn = ([], conn)
@@ -230,44 +229,50 @@ concatC s0 =
 
 insAtC :: Int -> ConcatC -> ConcatC -> ConcatC
 insAtC i is is0 =
-  foldl (flip (Seq.insertAt i)) is0 is
+  Data.Foldable.foldl' (flip (Seq.insertAt i)) is0 is
 
 trConcatCAtomic :: Diff a => DeltaS (S a) -> ConcatC -> (Delta (S a), ConcatC)
 trConcatCAtomic (SIns i s') c =
   -- in this case, a sequence s' is inserted at ith element
-  let toI = sum (Seq.take i c)
-  in (injDelta (SIns toI (Control.Monad.join s')), insAtC i (s2c s') c)
+  let !toI = sum (Seq.take i c)
+      !c'  = insAtC i (s2c s') c
+  in (injDelta $! SIns toI (Control.Monad.join s'), c')
 trConcatCAtomic (SDel i n) c =
-  let (c1, c23) = Seq.splitAt i c
-      (c2, c3)  = Seq.splitAt n c23
-      toI       = sum c1
-      toN       = sum c2
-  in (injDelta (SDel toI toN), c1 Seq.>< c3)
+  let (!c1, !c23) = Seq.splitAt i c
+      (!c2, !c3)  = Seq.splitAt n c23
+      !toI        = sum c1
+      !toN        = sum c2
+      !c'         = c1 Seq.>< c3
+  in (injDelta $! SDel toI toN, c')
 trConcatCAtomic (SRearr i n j) c =
-  let (c1, c23) = Seq.splitAt i c
-      (c2, c3)  = Seq.splitAt n c23
-      toI       = sum c1
-      toN       = sum c2
-      c13       = c1 Seq.>< c3
-      toJ       = sum $ Seq.take j c13
-  in (injDelta (SRearr toI toN toJ), insAtC j c2 c13 )
+  let (!c1, !c23) = Seq.splitAt i c
+      (!c2, !c3)  = Seq.splitAt n c23
+      !toI        = sum c1
+      !toN        = sum c2
+      !c13        = c1 Seq.>< c3
+      !toJ        = sum $ Seq.take j c13
+      !c'         = insAtC j c2 c13
+  in (injDelta $! SRearr toI toN toJ, c' )
 trConcatCAtomic (SRep i ds) c =
-  let ci = fromJust $ Seq.lookup i c
-      offset = sum $ Seq.take i c
-      (ds', ci') = iterTr (goAtomic offset) ds ci
-  in (ds', Seq.update i ci' c)
+  let !ci = fromJust $ Seq.lookup i c
+      !offset = sum $ Seq.take i c
+      !(!ds', !ci') = iterTr (goAtomic offset) ds ci
+      !c' = Seq.update i ci' c
+  in (ds', c')
   where
     goAtomic :: Diff a => Int -> DeltaS a -> Int -> (Delta (S a), Int)
-    goAtomic offset (SIns j as) ci =
-      (injDelta (SIns (offset + j) as), ci + Seq.length (unS as))
-    goAtomic offset (SDel j n) ci =
+    goAtomic !offset (SIns j as) ci =
+      let !ci' = ci + Seq.length (unS as)
+      in (injDelta $! SIns (offset + j) as, ci')
+    goAtomic !offset (SDel j n) ci =
       let -- adjust n to satisfy the invaliant n + j <= ci
-          n' = n + (if j + n > ci then ci - (j + n) else 0)
-      in (injDelta (SDel (offset + j) n'), ci - n')
-    goAtomic offset (SRep j da) ci =
+          !n'  = n + (if j + n > ci then ci - (j + n) else 0)
+          !ci' = ci - n'
+      in (injDelta $! SDel (offset + j) n', ci')
+    goAtomic !offset (SRep j da) ci =
       (srep (offset + j) da, ci)
-    goAtomic offset (SRearr j n k) ci =
-      (injDelta (SRearr (offset + j) n (offset + k)), ci)
+    goAtomic !offset (SRearr j n k) ci =
+      (injDelta $! SRearr (offset + j) n (offset + k), ci)
 
 concatF :: (IncrementalizedQ c, App2 c t e, K c ~ Diff, K c a, K c (S (S a)), K c (S a))
            => e (S (S a)) -> e (S a)
@@ -308,17 +313,18 @@ infixr 5 @+
 
 
 class MapAPI term where
-  mapAPI :: (Diff a, Diff b) => term (a ': s) b -> term (S a ': s) (S b)
+  mapAPI :: (Diff a, Diff b, AllIn s Diff) => term (a ': s) b -> term (S a ': s) (S b)
 
 mapTr ::
   (Diff a, Diff b)
   => (a -> (b, c)) -> (Bool -> Delta a -> c -> (Delta b, c))
   -> Seq c -> Delta (S a) -> (Delta (S b), Seq c )
-mapTr f dfb cs ds =
+mapTr f dfb !cs ds =
   let -- FIXME: can we avoid this step in some ways?
-      (dbs1, cs') = mapTrUnchanged (dfb True mempty) cs
-      (dbs2, cs'') = iterTr (mapTrChanged f (dfb False)) ds cs'
-  in (dbs1 <> dbs2, cs'')
+      !(!dbs1, !cs')  = mapTrUnchanged (dfb True mempty) cs
+      !(!dbs2, !cs'') = iterTr (mapTrChanged f (dfb False)) ds cs'
+      !dbs' = dbs1 <> dbs2
+  in (dbs', cs'')
 
 sequenceDelta :: Diff a => Seq (Delta a) -> Delta (S a)
 sequenceDelta s =
@@ -331,7 +337,7 @@ mapTrUnchanged ::
   => (c -> (Delta b, c))
   -> Seq.Seq c -> (Delta (S b), Seq.Seq c)
 mapTrUnchanged unchanged cs =
-  let (dbs, cs') = Seq.unzip $ fmap unchanged cs
+  let !(!dbs, !cs') = Seq.unzip $ fmap unchanged cs
   in (sequenceDelta dbs, cs')
 
 mapTrChanged ::
@@ -340,18 +346,18 @@ mapTrChanged ::
   -> (Delta a -> c -> (Delta b, c))
   -> AtomicDelta (S a) -> Seq c -> (Delta (S b), Seq c)
 mapTrChanged f _df (SIns i (S as)) cs     =
-  let (bs, cs') = Seq.unzip $ fmap f as
-  in (injDelta (SIns i (S bs)), insSeq i cs' cs)
+  let !(!bs, !cs') = Seq.unzip $ fmap f as
+  in (injDelta $! SIns i (S bs), insSeq i cs' cs)
 mapTrChanged _ _df (SDel i n) cs     =
-  let cs' = delSeq i n cs
-  in (injDelta (SDel i n), cs')
+  let !cs' = delSeq i n cs
+  in (injDelta $! SDel i n, cs')
 mapTrChanged _ df (SRep i da) cs    =
-  let ci = Seq.index cs i
-      (db, ci') = df da ci
+  let !ci = Seq.index cs i
+      !(!db, !ci') = df da ci
   in (srep i db, Seq.update i ci' cs)
 mapTrChanged _ _df (SRearr i n j) cs =
-  let cs' = rearrSeq i n j cs
-  in (injDelta (SRearr i n j), cs')
+  let !cs' = rearrSeq i n j cs
+  in (injDelta $! SRearr i n j, cs')
 -- mapTr ::
 --   (a -> (b, c))
 --   -> (c -> (Delta b, c))            -- unchanged part
@@ -426,7 +432,8 @@ cMapT (IFqT (ECons _ tenv) (sh :: Conn Proxy cs) f tr) =
       (dbs, cs') <- CodeC $ \k -> [||
           let fElem  = $$(h env')
               trElem = $$(trh denv sh)
-              (dbs, cs2') = mapTr fElem trElem $$cs $$das
+              (dbs, cs2') = -- mapTr fElem trElem $$cs $$das
+                if $$(allEmptyDelta denv) then iterTr (mapTrChanged fElem (trElem False)) $$das $$cs else mapTr fElem trElem $$cs $$das
           in $$(k ([|| dbs ||], [|| cs2' ||]))
         ||]
       return ([|| $$dbs ||], joinConn (CNE $ COne $ PackedCode cs') (convertEnv env'))
@@ -485,10 +492,15 @@ cMapTE (IFqTE (ECons _ tenv) (sh :: Conn Proxy cs) f tr)
       (dbs, cs') <- CodeC $ \k -> [||
           let fElem  = trackInputInC $$(h env)
               trElem = $$(trh env denv sh)
-              (dbs, cs2') = mapTr fElem trElem $$cs $$das
+              (dbs, cs2') = -- mapTr fElem trElem $$cs $$das
+                  if $$(allEmptyDelta denv) then iterTr (mapTrChanged fElem (trElem False)) $$das $$cs else mapTr fElem trElem $$cs $$das
           in $$(k ([|| dbs ||], [|| cs2' ||]))
         ||]
       return ([|| $$dbs ||], CNE $ COne $ PackedCode cs')
+
+allEmptyDeltaEnv :: Env PackedDelta as -> Bool
+allEmptyDeltaEnv ENil = True
+allEmptyDeltaEnv (ECons (PackedDelta d) ds) = checkEmpty d && allEmptyDeltaEnv ds
 
 mkMapInt ::
   forall s a b.
@@ -502,7 +514,7 @@ mkMapInt env h' trh c0 = CodeC $ \k -> [||
       let mapInt c = Interaction $ \(ECons (PackedDelta das) denv) ->
             let f = $$h' $ zipWithEnv (\(Identity a) (PackedDelta da) -> Identity $ a /+ da) $$env denv
                 trF = $$trh denv
-                (dbs, c') = mapTr f trF c das
+                (dbs, c') = if allEmptyDeltaEnv denv then iterTr (mapTrChanged f (trF False)) das c else mapTr f trF c das
             in (dbs, mapInt c') -- (dbs, mapInt c')
       in $$(k [|| mapInt $$c0 ||])
   ||]
@@ -524,6 +536,7 @@ instance MapAPI IFFT where
 cMapF :: forall s a b. (Diff a, Diff b) => IFFT (a ': s) b -> IFFT (S a ': s) (S b)
 cMapF (IFFT (ECons _ tenv) h) = IFFT (ECons Proxy tenv) $ \(ECons (PackedCode as) env) -> do
   let cenv = packEnv env
+  h'' <- shareNonGen mkH
   (bs, is) <- CodeC $ \k -> [||
         let (bs, is) = Seq.unzip $ fmap ($$h'' $$cenv) (unS $$as)
         in $$(k ([|| S bs ||] , [|| is ||]) )
@@ -531,8 +544,8 @@ cMapF (IFFT (ECons _ tenv) h) = IFFT (ECons Proxy tenv) $ \(ECons (PackedCode as
   i <- mkMapInt cenv h'' trh is
   return (bs, i)
   where
-    h'' :: Code (Env Identity s -> a -> (b, Interaction (Env PackedDelta (a ': s)) (Delta b)))
-    h'' = [|| \penv a -> $$(unpackEnv tenv [|| penv ||] $ \env -> runCodeC (h $ ECons (PackedCode [|| a ||]) env) $ \(b, i) -> [|| ($$b, $$i) ||]) ||]
+    mkH :: Code (Env Identity s -> a -> (b, Interaction (Env PackedDelta (a ': s)) (Delta b)))
+    mkH = [|| \penv a -> $$(unpackEnv tenv [|| penv ||] $ \env -> runCodeC (h $ ECons (PackedCode [|| a ||]) env) $ \(b, i) -> [|| ($$b, $$i) ||]) ||]
 
     trh :: Code (Env PackedDelta s -> Bool -> Delta a -> Interaction (Env PackedDelta (a ': s)) (Delta b) -> (Delta b, Interaction (Env PackedDelta (a ': s)) (Delta b)))
     trh = [|| \denv doesUpdateEnv da i ->
@@ -567,12 +580,23 @@ type family PairIfUsed a us cs where
 -- --    @+ 'NE ('NEOne (Seq.Seq (Conn Identity cs2)))
 --     @+ 'NE ('NEOne (Seq (PairIfUsed a us2 cs2)))
 
+allFalse :: forall xs. Env SBool xs -> Bool
+allFalse ENil              = True
+allFalse (ECons SFalse xs) = allFalse xs
+allFalse (ECons STrue _)   = False
+
+allEmptyDelta :: forall xs. Env PackedCodeDelta xs -> Code Bool
+allEmptyDelta ENil = [|| True ||]
+allEmptyDelta (ECons (PackedCodeDelta da) ENil) = [|| checkEmpty $$da ||]
+allEmptyDelta (ECons (PackedCodeDelta da) das)  = [|| checkEmpty $$da && $$(allEmptyDelta das) ||]
+
+
 type MapCEU a us cs = 'NE ('NEOne (Seq (PairIfUsed a us cs)))
 
 instance MapAPI IFqTEU where
   mapAPI = cMapTEU
 
-cMapTEU :: forall s a b. (Diff a, Diff b) => IFqTEU (a ': s) b -> IFqTEU (S a ': s) (S b)
+cMapTEU :: forall s a b. (Diff a, Diff b, AllIn s Diff) => IFqTEU (a ': s) b -> IFqTEU (S a ': s) (S b)
 cMapTEU (IFqTEU (ECons _ tenv) (sh ::Conn Proxy cs) (u :: Env SBool f_us) f (ut :: Env SBool tr_us) tr)
   = IFqTEU (ECons Proxy tenv) sh' u' f' ut' tr'
   where
@@ -612,11 +636,6 @@ cMapTEU (IFqTEU (ECons _ tenv) (sh ::Conn Proxy cs) (u :: Env SBool f_us) f (ut 
                     )
                   ||]
 
-    allFalse :: forall xs. Env SBool xs -> Bool
-    allFalse ENil              = True
-    allFalse (ECons SFalse xs) = allFalse xs
-    allFalse (ECons STrue _)   = False
-
     tr' ::
       Env PackedCode (Extr s (MergeUses (SafeTail f_us) (SafeTail tr_us)))
       -> Env PackedCodeDelta (S a : Extr s (SafeTail f_us))
@@ -627,7 +646,7 @@ cMapTEU (IFqTEU (ECons _ tenv) (sh ::Conn Proxy cs) (u :: Env SBool f_us) f (ut 
       let fenv = rearrEnv extF env
       let trenv = rearrEnv extT env
       (dbs, c') <- CodeC $ \k ->
-        if allFalse (tail' u) -- that is, f of map f is closed
+        if allFalse (tail' u) -- that is, f of map f is closed (not used for the case of 'cartesian')
           then
             [|| let fElem  = $$(h fenv)
                     trElem = $$(trh trenv denv sh)
@@ -637,7 +656,7 @@ cMapTEU (IFqTEU (ECons _ tenv) (sh ::Conn Proxy cs) (u :: Env SBool f_us) f (ut 
             [||
               let fElem  = $$(h fenv)
                   trElem = $$(trh trenv denv sh)
-                  (dbs, c') = mapTr fElem trElem $$c $$das
+                  (dbs, c') = if $$(allEmptyDelta denv) then iterTr (mapTrChanged fElem (trElem False)) $$das $$c else mapTr fElem trElem $$c $$das
               in $$(k ([|| dbs ||], [|| c' ||]))
             ||]
       return (dbs, CNE $ COne $ PackedCode c')
@@ -672,6 +691,122 @@ cMapTEU (IFqTEU (ECons _ tenv) (sh ::Conn Proxy cs) (u :: Env SBool f_us) f (ut 
 
 
 
+instance MapAPI IFqTEUS where
+  mapAPI = cMapTEUS
+
+
+type family EFunc as r where
+  EFunc '[] r       = r
+  EFunc (a ': as) r = a -> EFunc as r
+
+mkAbsE :: forall as r proxy. Env proxy as -> (Env PackedCode as -> Code r) -> Code (EFunc as r)
+mkAbsE ENil f         = f ENil
+mkAbsE (ECons _ sh) f = [|| \a -> $$(mkAbsE sh (f Prelude.. ECons (PackedCode [|| a ||])) ) ||]
+
+mkAppE :: forall as r. Code (EFunc as r) -> Env PackedCode as -> Code r
+mkAppE f ENil                      = f
+mkAppE f (ECons (PackedCode a) as) = mkAppE [|| $$f $$a ||] as
+
+cMapTEUS :: forall s a b. (Diff a, Diff b) => IFqTEUS (a ': s) b -> IFqTEUS (S a ': s) (S b)
+cMapTEUS (IFqTEUS (ECons _ tenv) (sh ::Conn Proxy cs) (u :: Env SBool f_us) (ut :: Env SBool tr_us) m)
+  = IFqTEUS (ECons Proxy tenv) sh' u' ut' $ do
+      (f, tr) <- m
+      let
+        h :: Env PackedCode (Extr s (SafeTail f_us)) -> Code (a -> (b, PairIfUsed a tr_us cs))
+        h = case ut of
+          ENil           -> h0
+          ECons SFalse _ -> h0
+          ECons STrue  _ -> \env -> [|| trackInputInC $$(h0 env) ||]
+          where
+            h0 :: Env PackedCode (Extr s (SafeTail f_us)) -> Code (a -> (b, EncCS cs))
+            h0 env = [|| \a -> $$(
+                          toCode $ do
+                            (b, c') <- f (extendEnv tenv u (PackedCode [|| a ||]) env)
+                            return [|| ($$b , $$(conn2cenv c')) ||]
+                        )
+                      ||]
+      func <- mkLet (mkAbsE tenvExt $ \env -> h env)
+      let
+        f' ::
+          Env PackedCode (S a : Extr s (SafeTail f_us))
+          -> CodeC (Code (S b), Conn PackedCode (MapCEU a tr_us cs))
+        f' (ECons (PackedCode as) env) = CodeC $ \k ->
+            [|| let fElem       = $$(mkAppE func env)
+                    !(!bs, !cs) = Seq.unzip $ fmap fElem (unS $$as)
+                in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||])) ||]
+
+        tr' ::
+          Env PackedCode (Extr s (MergeUses (SafeTail f_us) (SafeTail tr_us)))
+          -> Env PackedCodeDelta (S a : Extr s (SafeTail f_us))
+          -> Conn PackedCode (MapCEU a tr_us cs)
+          -> CodeC (Code (Delta (S b)),
+                    Conn PackedCode (MapCEU a tr_us cs))
+        tr' env (ECons (PackedCodeDelta das) denv) (CNE (COne (PackedCode c))) = do
+          let fenv = rearrEnv extF env
+          let trenv = rearrEnv extT env
+          (dbs, c') <- CodeC $ \k ->
+            if allFalse (tail' u) -- that is, f of map f is closed (not true for the 'cartesian' case)
+              then
+                [|| let fElem  = $$(mkAppE func fenv) --  $$(h fenv)
+                        trElem = $$(trh trenv denv sh)
+                        !(!dbs, !c') = iterTr (mapTrChanged fElem (trElem False)) $$das $$c
+                    in $$(k ([|| dbs ||], [|| c' ||])) ||]
+              else
+                [||
+                  let fElem  = $$(mkAppE func fenv) --  $$(h fenv)
+                      trElem = $$(trh trenv denv sh)
+                      !(!dbs, !c') = if $$(allEmptyDelta denv) then iterTr (mapTrChanged fElem (trElem False)) $$das $$c else mapTr fElem trElem $$c $$das
+                  in $$(k ([|| dbs ||], [|| c' ||]))
+                ||]
+          return (dbs, CNE $ COne $ PackedCode c')
+
+        trh
+          :: Env PackedCode (Extr s (SafeTail tr_us))
+            -> Env PackedCodeDelta (Extr s (SafeTail f_us))
+            -> Conn Proxy cs
+            -> Code (Bool
+                      -> Delta a
+                      -> PairIfUsed a tr_us cs
+                      -> (Delta b, PairIfUsed a tr_us cs))
+        trh trenv denv pcs = case ut of
+          ENil ->
+              [|| \_ da c ->
+                $$(cenv2conn pcs [|| c ||] $ \cs ->
+                  runCodeC (tr (extractingByNilIsNil $ ECons Proxy tenv) (extendEnv tenv u (PackedCodeDelta [|| da ||]) denv) cs) $ \(db, cs') -> [|| ($$db, $$(conn2cenv cs')) ||]) ||]
+          ECons SFalse _ ->
+              [|| \b da c ->
+                $$(cenv2conn pcs [|| c ||] $ \cs -> toCode $ do
+                    denv' <- mkLetEnvD $ mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
+                    (db, cs') <- tr trenv (extendEnv tenv u (PackedCodeDelta [|| da ||]) denv') cs
+                    return [|| ($$db, $$(conn2cenv cs')) ||]
+                  ) ||]
+          ECons STrue _ ->
+              [|| \b da (a, c) ->
+                $$(cenv2conn pcs [|| c ||] $ \cs -> toCode $ do
+                    denv' <- mkLetEnvD $ mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
+                    (db, cs') <- tr (extendEnv tenv ut (PackedCode [|| a ||]) trenv) (extendEnv tenv u (PackedCodeDelta [|| da ||]) denv') cs
+                    return  [|| ($$db, (a /+ da, $$(conn2cenv cs') )) ||])
+              ||]
+      return (f', tr')
+  where
+    sh' :: Conn Proxy (MapCEU a tr_us cs)
+    sh' = CNE $ COne $ Proxy @(Seq (PairIfUsed a tr_us cs))
+
+    tail' :: forall f xs. Env f xs -> Env f (SafeTail xs)
+    tail' ENil         = ENil
+    tail' (ECons _ xs) = xs
+
+    u' :: Env SBool ('True ': SafeTail f_us)
+    u' = ECons STrue (tail' u)
+
+    ut' :: Env SBool ('False ': MergeUses (SafeTail f_us) (SafeTail tr_us))
+    ut' = ECons SFalse ut0
+
+    (ut0, extF, extT) = mergeTupled (tail' u) (tail' ut) tenv
+
+    tenvExt = extractEnv tenv (tail' u)
+
+
 
 -- cMapTEU :: forall s a b. (Diff a, Diff b, AllIn s Diff) => IFqTEU s (S a) -> IFqTEU (a ': s) b -> IFqTEU s (S b)
 -- cMapTEU e1 e2 =
@@ -693,7 +828,7 @@ testCode proxy = compile $ runMonoWith proxy $ \xs -> cartesian (fstF xs) (sndF 
 
 
 
--- >>> let f = $$( testCode $ Proxy @IFqTEU )
+-- >>> let f = $$( testCode $ Proxy @IFFT )
 -- >>> let (res, tr) = f (S $ Seq.fromList [1,2,3], S $ Seq.fromList [10, 20, 30])
 -- >>> res
 -- >>> let (dr1, tr1) = runInteraction tr $ mconcat $ map injDelta [ADFst $ SIns 3 (S $ Seq.fromList [4])]

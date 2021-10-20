@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns    #-}
 {-# LANGUAGE GADTs           #-}
 {-# LANGUAGE RankNTypes      #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -5,6 +6,7 @@
 module Data.Code where
 
 import           Data.Delta          (Delta, Diff)
+import           Data.Function       ((&))
 import qualified Language.Haskell.TH as TH
 
 type Code a = TH.Q (TH.TExp a)
@@ -28,7 +30,12 @@ instance Monad CodeC where
 mkLet :: Code a -> CodeC (Code a)
 mkLet e = CodeC $ \k ->
   -- Used _v to avoid "unused ..." errors.
-  [|| let _v = $$( e ) in $$(k [|| _v ||]) ||]
+  [|| let !_v = $$( e ) in $$(k [|| _v ||]) ||]
+
+-- | A 'mkLet' variant that does not generalize types.
+shareNonGen :: Code a -> CodeC (Code a)
+shareNonGen e = CodeC $ \k ->
+  [|| $$e & (\ !_v -> $$(k [|| _v ||]))||]
 
 newtype PackedCode a = PackedCode { getCode :: Code a }
 

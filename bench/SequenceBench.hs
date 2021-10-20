@@ -1,8 +1,9 @@
-{-# LANGUAGE BangPatterns      #-}
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GADTs             #-}
-{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE BangPatterns              #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE TemplateHaskell           #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 
@@ -20,7 +21,7 @@ import           Data.List         (foldl')
 import           Data.IFFT         (IFFT)
 import           Data.IFqT         (IFqT)
 import           Data.IFqTE        (IFqTE)
-import           Data.IFqTEU       (IFqTEU)
+import           Data.IFqTEU       (IFqTEU, IFqTEUS)
 
 import           Data.Proxy        (Proxy (..))
 
@@ -86,30 +87,39 @@ tryScratch h = go (fst . h)
 
 
 
-dCartesianT, dCartesianTE, dCartesianTEU, dCartesianF :: (S Int, S Int) -> (S (Int, Int), Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int))))
+dCartesianT, dCartesianTE, dCartesianTEU, dCartesianTEUS, dCartesianF :: (S Int, S Int) -> (S (Int, Int), Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int))))
 
 dCartesianT   = $$( testCode (Proxy :: Proxy IFqT) )
 dCartesianTE  = $$( testCode (Proxy :: Proxy IFqTE ) )
 dCartesianTEU = $$( testCode (Proxy :: Proxy IFqTEU ) )
+dCartesianTEUS = $$( testCode (Proxy :: Proxy IFqTEUS ) )
 dCartesianF   = $$( testCode (Proxy :: Proxy IFFT ) )
 
+
+forProf :: ()
+forProf =
+  rnf $ tryInc dCartesianTEUS (mkInitSequences 1000) (insOuter 100 <> insInner 100)
 
 doBench :: String -> (S Int, S Int) -> [Delta (S Int, S Int)] -> Benchmark
 doBench gname a0 ds =
   env (return (a0, ds)) $ \ ~(a0', ds') ->
     bgroup gname [
-      -- bench "S"    $ nf (tryScratch dCartesianT a0') ds',
-      -- bench "T"    $ nf (tryInc dCartesianT a0') ds' ,
-      -- bench "TE"   $ nf (tryInc dCartesianTE a0') ds' ,
-      bench "TEU"  $ nf (tryInc dCartesianTEU a0') ds'  -- ,
---      bench "F"    $ nf (tryInc dCartesianF a0') ds'
+      bench "S"     $ nf (tryScratch dCartesianT a0') ds',
+      bench "T"     $ nf (tryInc dCartesianT a0') ds' ,
+      bench "TE"    $ nf (tryInc dCartesianTE a0') ds' ,
+      bench "TEU"   $ nf (tryInc dCartesianTEU a0') ds',
+      bench "TEUS"  $ nf (tryInc dCartesianTEUS a0') ds',
+      bench "F"     $ nf (tryInc dCartesianF a0') ds'
     ]
 
 
 main :: IO ()
+-- main = print $! forProf
 main = defaultMain [
     doBench "100-1-0" (mkInitSequences 100) (insOuter 1),
     doBench "100-0-1" (mkInitSequences 100) (insInner 1),
     doBench "200-1-0" (mkInitSequences 200) (insOuter 1),
-    doBench "200-0-1" (mkInitSequences 200) (insInner 1)
+    doBench "200-0-1" (mkInitSequences 200) (insInner 1),
+    doBench "200-10-0" (mkInitSequences 200) (insOuter 10),
+    doBench "200-0-10" (mkInitSequences 200) (insInner 10)
   ]

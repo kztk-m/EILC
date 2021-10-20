@@ -303,6 +303,9 @@ the
 
 but the construction suggests that we need to recompute things when we need to use the associated Δ translator---spoiling the usefulness of the cache transfer style. 
 
+**Oct 20, 2021** I realized that `map f` uses the code of `f` twice: one is in its cache construction and the other is in the Δ translator. This causes code duplication, but currently there is no 
+way to share code for cache construction and the Δ-translator except using `C`; but such a transformation itself does not depends on Δs and thus it is not a good idea to store them in `C`. 
+
 
 ---
 

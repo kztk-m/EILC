@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE DataKinds            #-}
 {-# LANGUAGE GADTs                #-}
 {-# LANGUAGE KindSignatures       #-}
@@ -220,7 +221,7 @@ instance IncrementalizedQ IFq where
         (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
           [|| let (db, c') = $$df $$da $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
 
-  compile = runIFq
+  compile (IFq _ f tr) = runIFq f tr
 
 multIFq :: IFq s a -> IFq s b -> IFq s (a, b)
 multIFq (IFq sh1 f1 tr1) (IFq sh2 f2 tr2) = IFq (joinConn sh1 sh2) f tr
@@ -340,6 +341,15 @@ mkAbs' :: NEConn Proxy cs -> (NEConn PackedCode cs -> Code a) -> Code (Func' cs 
 mkAbs' (COne _) k      = [|| \a -> $$(k (COne $ PackedCode [|| a ||])) ||]
 mkAbs' (CJoin c1 c2) k = mkAbs' c1 $ \c1' -> mkAbs' c2 $ \c2' -> k (CJoin c1' c2')
 
+mkAbsBang :: forall cs a. Conn Proxy cs -> (Conn PackedCode cs -> Code a) -> Code (Func cs a)
+mkAbsBang CNone k    = k CNone
+mkAbsBang (CNE cs) k = mkAbsBang' cs (k . CNE)
+
+mkAbsBang' :: NEConn Proxy cs -> (NEConn PackedCode cs -> Code a) -> Code (Func' cs a)
+mkAbsBang' (COne _) k      = [|| \ !a -> $$(k (COne $ PackedCode [|| a ||])) ||]
+mkAbsBang' (CJoin c1 c2) k = mkAbsBang' c1 $ \c1' -> mkAbsBang' c2 $ \c2' -> k (CJoin c1' c2')
+
+
 mkApp :: forall cs a. Code (Func cs a) -> Conn PackedCode cs -> Code a
 mkApp f CNone    = f
 mkApp f (CNE cs) = mkApp' f cs
@@ -381,18 +391,21 @@ cenv2conn' (CJoin p1 p2) env k =
 
 
 
-runIFq :: forall a b. IFq a b -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
-runIFq = \case (IFq _ f tr) ->
+runIFq :: forall a b cs.
+  (Code a -> CodeC (Code b, Conn PackedCode cs))
+   -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
+    -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
+runIFq = \f tr ->
                  [|| ensureDiffType $ \pa pb a ->
                          $$(toCode $ do (b, c) <- f [|| a ||]
                                         let rtr = mkRTr [|| pa ||] [|| pb ||] tr c
                                         return [|| ($$b, $$rtr) ||])
                   ||]
   where
-    mkRTr :: forall cs. Code (Proxy a) -> Code (Proxy b) -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs)) -> Conn PackedCode cs -> Code (Interaction (Delta a) (Delta b))
+    mkRTr :: forall cs'. Code (Proxy a) -> Code (Proxy b) -> (Code (Delta a) -> Conn PackedCode cs' -> CodeC (Code (Delta b), Conn PackedCode cs')) -> Conn PackedCode cs' -> Code (Interaction (Delta a) (Delta b))
     mkRTr pa pb tr c =
       [||
-         let func = $$(mkAbs pc $ \cs ->
+         let func = $$(mkAbsBang pc $ \cs ->
                         [|| mkInteraction $$pa $$pb $ \da ->
                                $$( runCodeC (tr [|| da ||] cs) $ \(db, cs') -> [|| ($$db, $$( mkApp [|| func ||] cs' )) ||] )
                         ||])
