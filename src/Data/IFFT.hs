@@ -20,6 +20,7 @@ import           Data.Env             (AllIn, Env (..))
 import           Language.Unembedding (CategoryK (..), HasProduct (..),
                                        LetTerm (..), Term (..), Wit (Wit))
 
+import           Data.IFq             (DiffTypeable)
 import           Data.Incrementalized (IncrementalizedQ (..))
 import           Data.Interaction     (Interaction (..))
 
@@ -72,7 +73,7 @@ composeInteraction i2 i1 = Interaction $ \a ->
 {-# INLINABLE composeInteraction #-}
 
 instance CategoryK IFF where
-  type K IFF = Diff
+  type K IFF = DiffTypeable
 
   id = IFF $ \a -> return (a, [|| idInteraction ||])
   IFF h2 . IFF h1 = IFF $ \a -> do

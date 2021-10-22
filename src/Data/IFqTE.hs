@@ -16,18 +16,21 @@ module Data.IFqTE where
 
 import           Data.Code            (Code, CodeC, PackedCode (..),
                                        PackedCodeDelta (..), mkLet)
+import           Data.Code.Lifting    (WitTypeable (WitTypeable))
+import           Data.Conn            (Conn (..), IsNone (IsNoneFalse), Join,
+                                       NEConn (COne), NETree (NEOne), Tree (NE),
+                                       decompConn, isNone, joinConn)
 import           Data.Delta           (Delta, Diff ((/+)), pairDelta)
 import           Data.Env             (Env (..))
-import           Data.IFq             (Conn (..), IFq (..), IsNone (..), Join,
-                                       NEConn (..), NETree (..), Tree (NE),
-                                       decompConn, isNone, joinConn)
+import           Data.IFq             (IFq (..))
 import           Data.Proxy           (Proxy (Proxy))
+import           Data.Typeable        (Typeable)
 import           Language.Unembedding (LetTerm (..), Term (..))
 
 
 data IFqTE as b =
   forall cs. IFqTE (Env Proxy as)
-                   (Conn Proxy cs)
+                   (Conn WitTypeable cs)
                    (Env PackedCode as -> CodeC (Code b, Conn PackedCode cs))
                    (Env PackedCode as -> Env PackedCodeDelta as -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
                     -- ^ should be updated
@@ -71,11 +74,11 @@ instance Term IFq IFqTE where
       f'  (ECons _ s) = f s
       tr' (ECons _ s) (ECons _ ds) = tr s ds
 
-  unliftTerm :: forall a b. Diff a =>  IFqTE '[a] b -> IFq a b
-  unliftTerm (IFqTE _ (i :: Conn Proxy cs) f tr) = IFq @(Join ('NE ('NEOne a)) cs) @a @b sh f' tr'
+  unliftTerm :: forall a b. (Diff a, Typeable a) =>  IFqTE '[a] b -> IFq a b
+  unliftTerm (IFqTE _ (i :: Conn WitTypeable cs) f tr) = IFq @(Join ('NE ('NEOne a)) cs) @a @b sh f' tr'
     where
-      sh :: Conn Proxy (Join ('NE ('NEOne a)) cs)
-      sh = joinConn (CNE (COne (Proxy @a))) i
+      sh :: Conn WitTypeable (Join ('NE ('NEOne a)) cs)
+      sh = joinConn (CNE (COne (WitTypeable @a))) i
 
       f' :: Code a -> CodeC (Code b, Conn PackedCode (Join ('NE ('NEOne a)) cs))
       f'  a    = do
@@ -91,14 +94,14 @@ instance Term IFq IFqTE where
         return (db, joinConn (CNE (COne (PackedCode a'))) c')
 
 instance LetTerm IFq IFqTE where
-  letTerm :: forall as a b. Diff a => IFqTE as a -> IFqTE (a ': as) b -> IFqTE as b
-  letTerm (IFqTE tenv (sh1 :: Conn Proxy cs1) f1 tr1)
-          (IFqTE _    (sh2 :: Conn Proxy cs2) f2 tr2) = IFqTE tenv sh f tr
+  letTerm :: forall as a b. (Diff a, Typeable a) => IFqTE as a -> IFqTE (a ': as) b -> IFqTE as b
+  letTerm (IFqTE tenv (sh1 :: Conn WitTypeable cs1) f1 tr1)
+          (IFqTE _    (sh2 :: Conn WitTypeable cs2) f2 tr2) = IFqTE tenv sh f tr
     where
-      shA :: Conn Proxy ('NE ('NEOne a))
-      shA = CNE (COne (Proxy @a))
+      shA :: Conn WitTypeable ('NE ('NEOne a))
+      shA = CNE (COne (WitTypeable @a))
 
-      sh :: Conn Proxy (Join ('NE ('NEOne a)) (Join cs1 cs2))
+      sh :: Conn WitTypeable (Join ('NE ('NEOne a)) (Join cs1 cs2))
       sh = joinConn shA (joinConn sh1 sh2)
 
       f :: Env PackedCode as

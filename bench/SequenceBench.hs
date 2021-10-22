@@ -21,7 +21,7 @@ import           Data.List         (foldl')
 import           Data.IFFT         (IFFT)
 import           Data.IFqT         (IFqT)
 import           Data.IFqTE        (IFqTE)
-import           Data.IFqTEU       (IFqTEU, IFqTEUS)
+import           Data.IFqTEU       (IFqTEUS)
 
 import           Data.Proxy        (Proxy (..))
 
@@ -87,11 +87,10 @@ tryScratch h = go (fst . h)
 
 
 
-dCartesianT, dCartesianTE, dCartesianTEU, dCartesianTEUS, dCartesianF :: (S Int, S Int) -> (S (Int, Int), Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int))))
+dCartesianT, dCartesianTE, dCartesianTEUS, dCartesianF :: (S Int, S Int) -> (S (Int, Int), Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int))))
 
 dCartesianT   = $$( testCode (Proxy :: Proxy IFqT) )
 dCartesianTE  = $$( testCode (Proxy :: Proxy IFqTE ) )
-dCartesianTEU = $$( testCode (Proxy :: Proxy IFqTEU ) )
 dCartesianTEUS = $$( testCode (Proxy :: Proxy IFqTEUS ) )
 dCartesianF   = $$( testCode (Proxy :: Proxy IFFT ) )
 
@@ -107,7 +106,6 @@ doBench gname a0 ds =
       bench "S"     $ nf (tryScratch dCartesianT a0') ds',
       bench "T"     $ nf (tryInc dCartesianT a0') ds' ,
       bench "TE"    $ nf (tryInc dCartesianTE a0') ds' ,
-      bench "TEU"   $ nf (tryInc dCartesianTEU a0') ds',
       bench "TEUS"  $ nf (tryInc dCartesianTEUS a0') ds',
       bench "F"     $ nf (tryInc dCartesianF a0') ds'
     ]

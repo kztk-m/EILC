@@ -10,6 +10,7 @@ import           Data.Code        (Code)
 import           Data.Delta       (AtomicDelta, Delta, Diff (..),
                                    HasAtomicDelta (..), iterTr, iterTrStateless)
 import           Data.Interaction (Interaction)
+import           Data.Typeable    (Typeable)
 
 class IncrementalizedQ cat where
   {-# MINIMAL (fromStateless|fromStatelessAtomic), (fromFunctions|fromFunctionsAtomic), compile #-}
@@ -37,7 +38,7 @@ class IncrementalizedQ cat where
     fromStateless f (\da -> [|| iterTrStateless (\da' -> $$(df [|| da' ||])) $$da ||])
 
   fromD ::
-    Diff a =>
+    (Typeable a, Diff a) =>
     (Code a  -> Code b)
     -> (Code a -> Code (Delta a) -> Code (Delta b))
     -> cat a b
@@ -46,7 +47,7 @@ class IncrementalizedQ cat where
        [|| \a -> ($$(f [|| a ||]), a) ||]
        [|| \da a -> let db = $$(df [|| a ||] [|| da ||]) in (db, a /+ da) ||]
   fromDAtomic ::
-    (HasAtomicDelta a, Monoid (Delta b)) =>
+    (Typeable a, HasAtomicDelta a, Monoid (Delta b)) =>
     (Code a  -> Code b)
     -> (Code a -> Code (AtomicDelta a) -> Code (Delta b))
     -> cat a b
@@ -56,12 +57,13 @@ class IncrementalizedQ cat where
        [|| \da a -> let db = $$(df [|| a ||] [|| da ||]) in (db, applyAtomicDelta a da) ||]
 
   fromFunctions ::
-    Code (a -> (b , c))
+    Typeable c
+    => Code (a -> (b , c))
     -> Code (Delta a -> c -> (Delta b, c))
     -> cat a b
   default
     fromFunctions ::
-      (HasAtomicDelta a, Monoid (Delta b))
+      (Typeable c, HasAtomicDelta a, Monoid (Delta b))
       => Code (a -> (b , c))
       -> Code (Delta a -> c -> (Delta b, c))
       -> cat a b
@@ -69,7 +71,7 @@ class IncrementalizedQ cat where
     fromFunctionsAtomic f [|| $$df . injDelta ||]
 
   fromFunctionsAtomic ::
-    (HasAtomicDelta a, Monoid (Delta b))
+    (Typeable c, HasAtomicDelta a, Monoid (Delta b))
     => Code (a -> (b , c))
     -> Code (AtomicDelta a -> c -> (Delta b, c))
     -> cat a b

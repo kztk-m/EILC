@@ -137,7 +137,7 @@ but, things become a bit simpler with the following type.
 forall s a b. Diff a => IFqTEU (a ': s) b -> IFqTEU (S a ': s) (S b)
 ```
 
-- [ ] Check this to know what causes the complication most. 
+- [x] Check this to know what causes the complication most. 
 
 ----
 
@@ -412,3 +412,150 @@ and solved straightforwardly by taking `[A,B] = A -> B` and `Δ[A,B] = A -> ΔA 
 
 
 Anyway, we are able to use the host language's higher-order functions, which essentially interprets the host system in presheaf (in an enriched category). 
+
+----
+
+**Oct 22, 2021** A notion called closure change is considered in Giarrusso et al.'s cache-transfer system. The basic idea is to consider a closure 
+
+    ∃Γ. (Γ × A -> B) × Γ 
+
+and changes to it     
+
+    ∃Γ. (Γ × A -> Δ(Γ × A) -> ΔB) × ΔΓ
+
+In the cache-transfer system, as these functions involve cache and are changed accordingly as: 
+
+    ∃Γ. (Γ × A -> B × C) × Γ 
+    ∃Γ. (Γ × A -> Δ(Γ × A) -> C -> ΔB × C) × Γ × ΔΓ 
+
+However, there is a severe problem: since Γ is existentially quantified, the delta is actually inapplicable. Their workaround is to include the original function in the second one as
+
+    ∃Γ. (Γ × A -> B × C) × (Γ × A -> Δ(Γ × A) -> C -> ΔB × C) × Γ × ΔΓ  
+
+and define the update application operator ⊕ as: 
+
+    _ ⊕ (f, df, θ, dθ) = (f ⊕ df, θ ⊕ dθ)
+
+Clearly, this approach does not support composition of updates in general. They actually wrote in their code as: 
+
+> ```haskell 
+> -- Since this composition function is problematic, do not export it through typeclasses, which allow using it implicitly.
+> -- instance CompChangeStruct (Fun a b c) where
+> --   ocompose = composeDFun
+> ```
+
+Then, let's rethink how we express functions in our system. If we allow ourselves to expose `C`, a straightforward approach is to use `[A, B] = A -> B × C`, `Δ[A, B] = ΔA × C -> ΔB × C`
+and `C' = ()` in the below. 
+
+    (Γ × A -> B × C) × (ΔΓ × ΔA × C -> ΔB × C)
+    ~ (Γ -> [A, B] × C') × (ΔΓ × C' -> Δ[A, B] × C')
+
+But, `[A, B]` and `Δ[A, B]` clearly cannot expose `C`, as it is not included in the type parameter and hidden by using the existential quantification. So, we use `Dynamic` as below. 
+
+```haskell
+data Dynamic where 
+  Dynamic :: TypeRep a -> a -> Dynamic 
+```
+
+Since the construction of `TypeRep` is only allowed by using the type class method of `Typeable`, one can think the above is 
+
+```haskell 
+data Dynamic where 
+  Dynamic :: Typeable a => a -> Dynamic 
+```
+
+meaning that we can hide the type of a value if its type is an instance of `Typeable`, which guarantees same downcasting. So, our suggestion is to use `Dynamic` instead of `C` to address the issue of the exposure, while we internally treat them as `C` by casting.  
+
+```
+ [A, B] = A -> B × Dynamic
+Δ[A, B] = ΔA × Dynamic -> ΔB × Dynamic 
+```
+
+A caveat here is the behavior of Δ-translator `Δ[A, B]` is a bit different from what is obtained from the interpretation `∃C. (Γ -> A × C) × (ΔΓ × C -> ΔA × C)` of a term-in-context `Γ ⊢ e : A`. The latter is guaranteed to produce nil changes and no changes on its internal state if `ΔΓ` is a nil change. However, there is no such guarantee for the former one, which is intuitively because a function can have free variables and changes to the values of such free variables lead to the change on its result. 
+
+The original paper say an element of `Δ[A, B]` that satisfies the above property a nil function change. As we can define 
+
+    f ⊕ df = \a ->
+         let (b,  c1) = f a
+             (db, c2) = df 0 c1 
+         in (b ⊕ db, c2) 
+
+However, this definition is not enough to determine how the composition of `Δ[A,B]` elements behaves: we cannot determine the ??? part below, which can either be `0` or `da` to make the above equation to hold. 
+
+     df ⊕ df' = \(da, c) -> 
+                   let (db1, c1) = df  ??? c  
+                       (db2, c2) = df' ??? c1 
+                   in (db1 ⊕ db2, c2) 
+
+(We assumed that `f`, `df` and `df'` hold the same `C` internally.) 
+
+In the original paper, a function change is required to satify the following law:
+
+     f a ⊕ df a da = (f ⊕ df) (a ⊕ da) 
+
+This may correspond to the below one in our setting. 
+
+     let (b,  c)  = f a 
+         (db, c') = df da c 
+     in (b ⊕ db, c') 
+     = 
+     let (b,  c1)  = f (a ⊕ da)
+         (db, c' ) = df 0 c1 
+     in (b ⊕ db, c') 
+
+Replacing `df` with `df1 ⊕ df2` yields.
+
+     let (b,  c1) = f a 
+         (db1, c2) = df1 ??? c1
+         (db2, c3) = df2 ??? c2 
+     in (b ⊕ db1 ⊕ db2, c2)
+     = 
+     let (b,   c1)  = f (a ⊕ da)
+         (db1, c' ) = df1 0 c1 
+         (db2, c' ) = df2 0 c1 
+     in (b ⊕ db1 ⊕ db2, c') 
+
+Then, we use the above equation again for the RHS to obtain: 
+
+     let (b,   c1)  = f (a ⊕ da)
+         (db1, c' ) = df1 0 c1 
+         (db2, c' ) = df2 0 c1 
+     in (b ⊕ db1 ⊕ db2, c') 
+     = 
+     let (b,   c1)  = f a
+         (db1, c' ) = df1 da c1 
+         (db2, c' ) = df2 0 c1 
+     in (b ⊕ db1 ⊕ db2, c') 
+ 
+This suggest that the composition must satisfy the below. 
+
+     df ⊕ df' = \(da, c) -> 
+                   let (db1, c1) = df  da c  
+                       (db2, c2) = df' 0  c1 
+                   in (db1 ⊕ db2, c2) 
+
+Also, since we have `f ⊕ df ⊕ df' = (f ⊕ df) ⊕ df'`, we have: 
+
+     let (b,   c1)  = (f ⊕ df1) (a ⊕ da)
+         (db2, c' ) = df2 0 c1 
+     in (b ⊕ db1 ⊕ db2, c') 
+    =
+     let (b,   c1)  = (f  ⊕ df1) a
+         (db2, c' ) = df2 da c1 
+     in (b ⊕ db1 ⊕ db2, c') 
+     =      
+     let (b,   c1)  = f a
+         (db1, c2) = df1 0  c1 
+         (db2, c') = df2 da c2
+     in (b ⊕ db1 ⊕ db2, c') 
+
+- [ ] Check this more carefully. 
+
+Thus, the net effect is the same with the definition below: 
+
+     df ⊕ df' = \(da, c) -> 
+                   let (db1, c1) = df  0  c  
+                       (db2, c2) = df' da c1 
+                   in (db1 ⊕ db2, c2) 
+
+Here, `df` satisfying `df 0 c = (0, c)` is called nil change, as it satisfies `f ⊕ df = f`. 

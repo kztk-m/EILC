@@ -231,7 +231,8 @@ class Term cat term => LetTerm cat term where
 class LetTerm cat term => FunTerm cat (term :: [k] -> k -> Type) where
   type IHom cat (a :: k) (b :: k) :: k
   lamTerm   :: (AllIn s (K cat), K cat a, K cat b) => term (a : s) b -> term s (IHom cat a b)
-  unlamTerm :: (AllIn s (K cat), K cat a, K cat b) => term s (IHom cat a b) -> term (a : s) b
+  appTerm   :: (AllIn s (K cat), K cat a, K cat b) => term s (IHom cat a b) -> term s a -> term s b
+--  unlamTerm :: (AllIn s (K cat), K cat a, K cat b) => term s (IHom cat a b) -> term (a : s) b
 
 share ::
   forall cat term e a b.
@@ -249,9 +250,8 @@ app ::
   forall cat term e a b.
   (FunTerm cat term, App2 cat term e, K cat a, K cat b)
   => e (IHom cat a b) -> e a -> e b
-app =
-  liftSO2 (Proxy @'[ '[], '[] ])
-  (\e1 e2 -> letTerm e2 (unlamTerm e1) )
+app = liftSO2 (Proxy @'[ '[], '[] ]) appTerm
+
 
 
 

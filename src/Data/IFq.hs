@@ -1,5 +1,5 @@
-{-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE GADTs                #-}
 {-# LANGUAGE KindSignatures       #-}
 {-# LANGUAGE LambdaCase           #-}
@@ -44,55 +44,16 @@ import           Data.Proxy            (Proxy (..))
 
 
 import           Data.Code
+import           Data.Code.Lifting
+import           Data.Conn
 import           Data.Delta
 import           Data.Env
 import           Data.Incrementalized
 import           Data.Interaction
+import           Data.Typeable         (Typeable)
 import           Language.Unembedding
 
-data NETree a = NEOne a | NEJoin !(NETree a) !(NETree a)
-data Tree a = None | NE (NETree a)
 
-data Conn f as where
-  CNone :: Conn f 'None
-  CNE   :: !(NEConn f as) -> Conn f ('NE as)
-
-data NEConn f as where
-  COne  :: !(f a) -> NEConn f ('NEOne a)
-  CJoin :: !(NEConn f as) -> !(NEConn f bs) -> NEConn f ('NEJoin as bs)
-
-map2Conn :: (forall a. f a -> g a) -> Conn f as -> Conn g as
-map2Conn _ CNone     = CNone
-map2Conn f (CNE cne) = CNE (map2NEConn f cne)
-
-map2NEConn :: (forall a. f a -> g a) -> NEConn f as -> NEConn g as
-map2NEConn f (COne a)      = COne (f a)
-map2NEConn f (CJoin c1 c2) = CJoin (map2NEConn f c1) (map2NEConn f c2)
-
-
-type family Join (as :: Tree k) (bs :: Tree k) :: Tree k where
-  Join 'None a      = a
-  Join ('NE a) 'None = 'NE a
-  Join ('NE a) ('NE b) = 'NE ('NEJoin a b)
-
-joinConn :: Conn f as -> Conn f bs -> Conn f (Join as bs)
-joinConn CNone c         = c
-joinConn (CNE x) CNone   = CNE x
-joinConn (CNE x) (CNE y) = CNE (CJoin x y)
-
-data IsNone as where
-  IsNoneTrue  :: IsNone 'None
-  IsNoneFalse :: IsNone ('NE sh)
-
-isNoneAnd :: IsNone as -> IsNone bs -> IsNone (Join as bs)
-isNoneAnd IsNoneTrue  b           = b
-isNoneAnd IsNoneFalse IsNoneTrue  = IsNoneFalse
-isNoneAnd IsNoneFalse IsNoneFalse = IsNoneFalse
-
-decompConn :: IsNone as -> IsNone bs -> Conn f (Join as bs) -> (Conn f as, Conn f bs)
-decompConn IsNoneTrue  _            c                = (CNone, c)
-decompConn IsNoneFalse IsNoneTrue  (CNE x)           = (CNE x, CNone)
-decompConn IsNoneFalse IsNoneFalse (CNE (CJoin x y)) = (CNE x, CNE y)
 
 data IFt a b = forall cs. IFt (IsNone cs) (a -> (b, Conn Identity cs)) (AtomicDelta a -> Conn Identity cs -> (Delta b, Conn Identity cs))
 
@@ -159,9 +120,6 @@ mkLetConn (CNE e) = CNE <$> mkLetConn' e
     mkLetConn' (CJoin c1 c2) = CJoin <$> mkLetConn' c1 <*> mkLetConn' c2
 
 
-isNone :: Conn Proxy cs -> IsNone cs
-isNone CNone   = IsNoneTrue
-isNone (CNE _) = IsNoneFalse
 
 
 
@@ -175,12 +133,17 @@ isNone (CNE _) = IsNoneFalse
 --         (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
 
 data IFq a b where
-  IFq :: Conn Proxy cs -> (Code a -> CodeC (Code b, Conn PackedCode cs)) -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs)) -> IFq a b
+  IFq :: Conn WitTypeable cs -> (Code a -> CodeC (Code b, Conn PackedCode cs)) -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs)) -> IFq a b
 
 
+class (Diff a, Typeable a) => DiffTypeable a
+instance (Diff a, Typeable a) => DiffTypeable a
 
+convTEnv :: AllIn as DiffTypeable => Env proxy as -> Env WitTypeable as
+convTEnv ENil         = ENil
+convTEnv (ECons _ as) = ECons WitTypeable (convTEnv as)
 instance CategoryK IFq where
-  type K IFq = Diff
+  type K IFq = DiffTypeable
   id = IFq CNone (\a -> return (a, CNone))
                  (\da _ -> return (da , CNone))
 
@@ -216,7 +179,7 @@ instance IncrementalizedQ IFq where
     IFq CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df da) ; return (v, CNone) })
 
   fromFunctions f df =
-    IFq (CNE (COne Proxy))
+    IFq (CNE (COne WitTypeable))
         (\a -> CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))) ) ||])
         (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
           [|| let (db, c') = $$df $$da $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
@@ -240,14 +203,6 @@ multIFq (IFq sh1 f1 tr1) (IFq sh2 f2 tr2) = IFq (joinConn sh1 sh2) f tr
 
 
 
-unCNE :: Conn f ('NE cs) -> NEConn f cs
-unCNE (CNE cs) = cs
-
-unCOne :: NEConn f ('NEOne c) -> f c
-unCOne (COne c) = c
-
-unCJoin :: NEConn f ('NEJoin c1 c2) -> (NEConn f c1, NEConn f c2)
-unCJoin (CJoin c1 c2) = (c1, c2)
 
 -- dumpIFq :: IFq a b -> IO ()
 -- dumpIFq (IFq IsNoneTrue f tr) = do
@@ -265,24 +220,6 @@ unCJoin (CJoin c1 c2) = (c1, c2)
 --   putStrLn $ TH.pprint $ TH.unType e
 --   putStrLn "printing df is not implemented"
 
-conn2code :: Conn PackedCode cs -> Code (Conn Identity cs)
-conn2code CNone   = [|| CNone ||]
-conn2code (CNE c) = [|| CNE $$(conn2code' c) ||]
-
-conn2code' :: NEConn PackedCode cs -> Code (NEConn Identity cs)
-conn2code' (COne (PackedCode c)) = [|| COne (Identity $$c) ||]
-conn2code' (CJoin c1 c2)         = [|| CJoin $$(conn2code' c1) $$(conn2code' c2) ||]
-
-
-code2conn :: forall cs r. Conn Proxy cs -> Code (Conn Identity cs) -> (Conn PackedCode cs -> Code r) -> Code r
-code2conn CNone      c k = [|| let _ = $$c in $$(k CNone) ||]
-code2conn (CNE pcne) c k = code2conn' pcne [|| unCNE $$c ||] (k . CNE)
-
-code2conn' :: forall cs' r. NEConn Proxy cs' -> Code (NEConn Identity cs') -> (NEConn PackedCode cs' -> Code r) -> Code r
-code2conn' (COne _) c k = k (COne $ PackedCode [|| runIdentity (unCOne $$c) ||])
-code2conn' (CJoin pc1 pc2) c k =
-  [|| let (c1, c2) = unCJoin $$c
-      in $$(code2conn' pc1 [|| c1 ||] $ \c1' -> code2conn' pc2 [|| c2 ||] $ \c2' -> k (CJoin c1' c2')) ||]
 
 ensureDiffType :: (Proxy a -> Proxy b -> a -> (b, Interaction (Delta a) (Delta b))) -> (a -> (b, Interaction (Delta a) (Delta b)))
 ensureDiffType f = f Proxy Proxy
@@ -323,72 +260,6 @@ First, let me think of Func cs a.
    Func (CJoin c1 c2) a = Func c1 (Func c2 a)
 
 -}
-
-type family Func (cs :: Tree Type) (a :: Type) :: Type where
-  Func 'None a    = a
-  Func ('NE ne) a = Func' ne a
-
-type family Func' (cs :: NETree Type) (a :: Type ) :: Type where
-  Func' ('NEOne c) a      = c -> a
-  Func' ('NEJoin c1 c2) a = Func' c1 (Func' c2 a)
-
-
-mkAbs :: forall cs a. Conn Proxy cs -> (Conn PackedCode cs -> Code a) -> Code (Func cs a)
-mkAbs CNone k    = k CNone
-mkAbs (CNE cs) k = mkAbs' cs (k . CNE)
-
-mkAbs' :: NEConn Proxy cs -> (NEConn PackedCode cs -> Code a) -> Code (Func' cs a)
-mkAbs' (COne _) k      = [|| \a -> $$(k (COne $ PackedCode [|| a ||])) ||]
-mkAbs' (CJoin c1 c2) k = mkAbs' c1 $ \c1' -> mkAbs' c2 $ \c2' -> k (CJoin c1' c2')
-
-mkAbsBang :: forall cs a. Conn Proxy cs -> (Conn PackedCode cs -> Code a) -> Code (Func cs a)
-mkAbsBang CNone k    = k CNone
-mkAbsBang (CNE cs) k = mkAbsBang' cs (k . CNE)
-
-mkAbsBang' :: NEConn Proxy cs -> (NEConn PackedCode cs -> Code a) -> Code (Func' cs a)
-mkAbsBang' (COne _) k      = [|| \ !a -> $$(k (COne $ PackedCode [|| a ||])) ||]
-mkAbsBang' (CJoin c1 c2) k = mkAbsBang' c1 $ \c1' -> mkAbsBang' c2 $ \c2' -> k (CJoin c1' c2')
-
-
-mkApp :: forall cs a. Code (Func cs a) -> Conn PackedCode cs -> Code a
-mkApp f CNone    = f
-mkApp f (CNE cs) = mkApp' f cs
-
-mkApp' :: Code (Func' cs a) -> NEConn PackedCode cs -> Code a
-mkApp' f (COne (PackedCode a)) = [|| $$f $$a ||]
-mkApp' f (CJoin c1 c2)         = mkApp' (mkApp' f c1) c2
-
-type family Flatten cs where
-  Flatten 'None   = '[]
-  Flatten ('NE x) = Flatten' x '[]
-
-type family Flatten' cs r where
-  Flatten' ('NEOne c) r = c ': r
-  Flatten' ('NEJoin cs1 cs2) r = Flatten' cs1 (Flatten' cs2 r)
-
-conn2cenv :: Conn PackedCode cs -> Code (Env Identity (Flatten cs))
-conn2cenv CNone    = [|| ENil ||]
-conn2cenv (CNE cs) = conn2cenv' cs [|| ENil ||]
-
-conn2cenv' :: NEConn PackedCode cs -> Code (Env Identity rs) -> Code (Env Identity (Flatten' cs rs))
-conn2cenv' (COne (PackedCode c)) r = [|| ECons (Identity $$c) $$r ||]
-conn2cenv' (CJoin c1 c2) r         = conn2cenv' c1 (conn2cenv' c2 r)
-
-cenv2conn :: forall cs r. Conn Proxy cs -> Code (Env Identity (Flatten cs)) -> (Conn PackedCode cs -> Code r) -> Code r
-cenv2conn CNone  env k = [|| case $$env of { ENil -> $$(k CNone) } ||]
-cenv2conn (CNE (p :: NEConn Proxy cs')) env k = cenv2conn' @cs' @'[] @r p env $ \c env' ->
-  [|| case $$env' of { ENil -> $$(k (CNE c)) } ||]
-
-cenv2conn' :: forall cs ds r. NEConn Proxy cs -> Code (Env Identity (Flatten' cs ds)) -> (NEConn PackedCode cs -> Code (Env Identity ds) -> Code r) -> Code r
-cenv2conn' (COne _) env k =
-  [||
-    let x = headEnv $$env
-        xs = tailEnv $$env
-    in $$( k (COne (PackedCode [|| runIdentity x ||])) [|| xs ||] )
-  ||]
-cenv2conn' (CJoin p1 p2) env k =
-  cenv2conn' p1 env $ \c1 env' -> cenv2conn' p2 env' $ \c2 env'' -> k (CJoin c1 c2) env''
-
 
 
 runIFq :: forall a b cs.
@@ -438,3 +309,55 @@ instance HasProduct IFq where
 
   unitOk _ = Wit
   prodOk _ _ _ = Wit
+
+
+
+data IFqS a b where
+  IFqS :: Conn WitTypeable cs -> CodeC (Code a -> CodeC (Code b, Conn PackedCode cs), Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs)) -> IFqS a b
+
+instance CategoryK IFqS where
+  type K IFqS = DiffTypeable
+
+  id = IFqS CNone $
+        return (\a -> return (a, CNone),
+                \da _ -> return (da , CNone))
+
+  IFqS sh2 m2 . IFqS sh1 m1 = IFqS (joinConn sh1 sh2) $ do
+    (f1, tr1) <- m1
+    (f2, tr2) <- m2
+    let
+      f a = do
+        (b, c1) <- f1 a
+        (c, c2) <- f2 b
+        return (c, joinConn c1 c2)
+
+      tr da cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+        (dbs, c1') <- tr1 da c1
+        (dcs, c2') <- tr2 dbs c2
+        return (dcs, joinConn c1' c2')
+    return (f , tr)
+
+
+instance HasProduct IFqS where
+  type Unit IFqS = ()
+  type Prod IFqS a b = (a, b)
+
+  unitOk _ = Wit
+  prodOk _ _ _ = Wit
+
+instance IncrementalizedQ IFqS where
+  fromStateless f df =
+    IFqS CNone $
+      return (\a -> do { v <- mkLet (f a); return (v, CNone) },
+              \da _ -> do { v <- mkLet (df da) ; return (v, CNone) })
+
+  fromFunctions f df =
+    IFqS (CNE (COne WitTypeable)) $
+      return
+        (\a -> CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))) ) ||],
+         \da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
+           [|| let (db, c') = $$df $$da $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
+
+  compile (IFqS _ m) = toCode $ do
+    (f, tr) <- m
+    return $ runIFq f tr

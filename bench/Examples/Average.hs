@@ -18,6 +18,7 @@ import           Language.Unembedding
 
 import           Data.Incrementalized
 import           Data.Proxy           (Proxy (..))
+import           Data.Typeable        (Typeable)
 
 newtype Bag a = Bag [a] deriving (Monoid, Semigroup)
 
@@ -72,14 +73,14 @@ appC = fromStateless (\z -> [|| case $$z of { (Bag xs, Bag ys) -> Bag (xs ++ ys)
 
 -- appF :: App IFq e => e (Bag Double) -> e (Bag Double) -> e (Bag Double)
 appF ::
-  (K cat ~ Diff, Diff a, Diff b,
+  (K cat ~ DiffTypeable, Diff a, Typeable a, Diff b, Typeable b,
   App cat e, IncrementalizedQ cat,
   Prod cat a b ~ (Bag Double, Bag Double)) =>
   e a -> e b -> e (Bag Double)
 appF x y = lift appC (pair x y)
 
 cascadeAppS ::
-  (K cat ~ Diff, Diff b,
+  (K cat ~ DiffTypeable, Diff b, Typeable b,
   LetTerm cat term, App2 cat term e, IncrementalizedQ cat,
   Prod cat (Bag Double) (Bag Double) ~ (Bag Double, Bag Double)) =>
   Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
@@ -87,7 +88,7 @@ cascadeAppS 0 x f = f x
 cascadeAppS n x f = share (appF x x) $ \y -> cascadeAppS (n-1) y f
 
 cascadeAppC ::
-  (K cat ~ Diff, App cat e,
+  (K cat ~ DiffTypeable, App cat e,
   IncrementalizedQ cat,
   Prod cat (Bag Double) (Bag Double) ~ (Bag Double, Bag Double)) =>
   Int -> e (Bag Double) -> (e (Bag Double) -> p) -> p
@@ -95,15 +96,15 @@ cascadeAppC 0 x f = f x
 cascadeAppC n x f = let y = appF x x in cascadeAppC (n-1) y f
 
 
-aveDupDup :: (App2 IFq IFqT e) => e (Bag Double) -> e Double
+aveDupDup :: (App2 IFqS IFqT e) => e (Bag Double) -> e Double
 aveDupDup x = cascadeAppS 4 x ave
 
-aveDupDup' :: (App2 IFq IFqT e) => e (Bag Double) -> e Double
+aveDupDup' :: (App2 IFqS IFqT e) => e (Bag Double) -> e Double
 aveDupDup' x = cascadeAppC 4 x ave
 
 ave ::
   (IncrementalizedQ cat, App2 cat t e,
-   Diff ~ K cat,
+   DiffTypeable ~ K cat,
    Prod cat Double Double ~ (Double, Double))
   => (e (Bag Double) -> e Double)
 ave = \x -> mysum x `mydiv` i2d (len x)
