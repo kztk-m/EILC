@@ -38,10 +38,13 @@ library
     import: deps 
     exposed-modules:  
         Data.Code 
+        Data.Code.Lifting
+        Data.Conn 
         Data.Delta 
         Data.Env        
         Data.Interaction 
         Data.Incrementalized
+        Data.Incrementalized.Function 
         Data.IFq
         Data.IFqT 
         Data.IFqTE 

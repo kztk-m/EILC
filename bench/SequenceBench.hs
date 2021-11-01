@@ -90,6 +90,7 @@ tryScratch h = go (fst . h)
 dCartesianT, dCartesianTE, dCartesianTEUS, dCartesianF :: (S Int, S Int) -> (S (Int, Int), Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int))))
 
 dCartesianT   = $$( testCode (Proxy :: Proxy IFqT) )
+dCartesianTHO = $$( testCodeHO (Proxy :: Proxy IFqT) )
 dCartesianTE  = $$( testCode (Proxy :: Proxy IFqTE ) )
 dCartesianTEUS = $$( testCode (Proxy :: Proxy IFqTEUS ) )
 dCartesianF   = $$( testCode (Proxy :: Proxy IFFT ) )
@@ -105,6 +106,7 @@ doBench gname a0 ds =
     bgroup gname [
       bench "S"     $ nf (tryScratch dCartesianT a0') ds',
       bench "T"     $ nf (tryInc dCartesianT a0') ds' ,
+      bench "THO"   $ nf (tryInc dCartesianTHO a0') ds',
       bench "TE"    $ nf (tryInc dCartesianTE a0') ds' ,
       bench "TEUS"  $ nf (tryInc dCartesianTEUS a0') ds',
       bench "F"     $ nf (tryInc dCartesianF a0') ds'

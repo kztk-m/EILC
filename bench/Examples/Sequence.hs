@@ -25,36 +25,36 @@ module Examples.Sequence (
   S(..), type AtomicDelta(..),
   emptyF, singletonF, concatF, mapF,
 
-  cartesian,
-  testCode,
+  cartesian, cartesianHO,
+  testCode, testCodeHO,
   ) where
 
-import           Prelude               hiding ((.))
+import           Prelude                       hiding ((.))
 import qualified Prelude
 
-import qualified Control.Monad
-import           Data.Coerce           (coerce)
-import           Data.Maybe            (fromJust)
-import qualified Data.Sequence         as Seq
-import           EILC
-import           Language.Unembedding
-
-import qualified Data.Foldable         (foldl', toList)
-
-import           Data.Sequence         (Seq)
-import           Data.Typeable         (Proxy (Proxy), Typeable)
-
-import           Data.Functor.Identity (Identity (Identity))
-
-import           Data.Incrementalized
-
 import           Control.DeepSeq
+import qualified Control.Monad
+import           Data.Coerce                   (coerce)
+import           Data.Dynamic
+import qualified Data.Foldable                 (foldl', toList)
+import           Data.Incrementalized
+import           Data.Maybe                    (fromJust, fromMaybe, isJust)
+import           Data.Sequence                 (Seq)
+import qualified Data.Sequence                 as Seq
+import           Data.Typeable                 (Proxy (Proxy), Typeable)
+
 import           Data.Code.Lifting
 import           Data.Conn
 import           Data.Env
 import           Data.IFFT
 import           Data.IFqTEU
-import           Data.Interaction      (Interaction (..))
+import           Data.Interaction              (Interaction (..))
+import           EILC
+import           Language.Unembedding
+
+import           Data.Incrementalized.Function
+
+import           Data.Functor.Identity
 
 newtype S a = S { unS :: Seq.Seq a }
   deriving Show
@@ -419,12 +419,6 @@ cMapT (IFqT (ECons _ tenv) (sh :: Conn WitTypeable cs) m) = IFqT (ECons WitTypea
 
 
 
-mkLetEnv :: Env PackedCode aa -> CodeC (Env PackedCode aa)
-mkLetEnv = mapEnvA (\(PackedCode c) -> PackedCode <$> mkLet c)
-
-mkLetEnvD :: Env PackedCodeDelta aa -> CodeC (Env PackedCodeDelta aa)
-mkLetEnvD = mapEnvA (\(PackedCodeDelta c) -> PackedCodeDelta <$> mkLet c)
-
 type MapCE a cs = 'NE ('NEOne (Seq (a, EncCS cs)))
 
 trackInputInC :: (a -> (b, c)) -> (a -> (b, (a, c)))
@@ -538,6 +532,53 @@ cartesian as bs =
   concatMapF (\a -> mapF (pair a) bs) as
   where
     concatMapF f x = concatF (mapF f x)
+
+mapHOF :: FunT a b -> (FunT (S a) (S b), FunT a b)
+mapHOF (FunT f) = (h, FunT f)
+  where
+    h = FunT $ \(S as) ->
+          let (bs, cs) = Seq.unzip $ fmap f as
+          in (S bs, toDyn cs)
+
+mapHOTR :: (Diff a, Diff b) => Delta (FunT a b) -> FunT a b -> (Delta (FunT (S a) (S b)), FunT a b)
+mapHOTR (DFunT Empty _ df) ft@(FunT f) =
+  (DFunT Empty (\d -> (mempty, d)) dfMap, ft)
+  where
+    dfMap das d =
+      let Just cs = fromDynamic d
+          (db, cs') = iterTr (mapTrChanged f df) das cs
+      in (db, toDyn cs')
+mapHOTR dft@(DFunT _ dfNN df) ft@(FunT f) =
+  (DFunT Unk dfNNMap dfMap, ft /+ dft)
+  where
+    dfNNMap d =
+      let Just cs = fromDynamic d
+          (db, cs') = mapTrUnchanged dfNN cs
+      in (db, toDyn cs')
+
+    dfMap das d =
+      let Just cs = fromDynamic d
+          (db, cs') = iterTr (mapTrChanged f df) das cs
+      in (db, toDyn cs')
+
+mapHOC :: (IncrementalizedQ cat, Typeable a, Typeable b, Diff a, Diff b)
+         => cat (FunT a b) (FunT (S a) (S b))
+mapHOC = fromFunctions [|| mapHOF ||] [|| mapHOTR ||]
+
+mapHO :: (K cat (FunT a b), K cat (FunT (S a) (S b)), App2 cat term e, FunTerm cat term, IHom cat ~ FunT, K cat ~ DiffTypeable,
+          IncrementalizedQ cat, Typeable a, Typeable b, Diff a, Diff b) =>
+          (e a -> e b) -> e (S a) -> e (S b)
+mapHO f x = lift mapHOC (lam f) `app` x
+
+cartesianHO ::
+  forall cat term e a b.
+  (IncrementalizedQ cat, FunTerm cat term, IHom cat ~ FunT, K cat ~ DiffTypeable,
+   Prod cat a b ~ (a, b), App2 cat term e, Diff a, Typeable a, Diff b, Typeable b)
+   => e (S a) -> e (S b) -> e (S (a, b))
+cartesianHO as bs = concatMapHO (\a -> mapHO (pair a) bs) as
+  where
+    concatMapHO f x = concatF (mapHO f x)
+
 
 
 type family PairIfUsed a us cs where
@@ -808,9 +849,11 @@ type TestCodeType =
 testCode :: (K cat ~ DiffTypeable, MapAPI cat term, LetTerm cat term, Prod cat Int Int ~ (Int, Int), IncrementalizedQ cat, Term cat term) => Proxy term -> TestCodeType
 testCode proxy = compile $ runMonoWith proxy $ \xs -> cartesian (fstF xs) (sndF xs)
 
+testCodeHO :: (K cat ~ DiffTypeable, MapAPI cat term, FunTerm cat term, IHom cat ~ FunT, Prod cat Int Int ~ (Int, Int), IncrementalizedQ cat, Term cat term) => Proxy term -> TestCodeType
+testCodeHO proxy = compile $ runMonoWith proxy $ \xs -> cartesianHO (fstF xs) (sndF xs)
 
 
--- >>> let f = $$( testCode $ Proxy @IFFT )
+-- >>> let f = $$( testCode $ Proxy @IFqTE )
 -- >>> let (res, tr) = f (S $ Seq.fromList [1,2,3], S $ Seq.fromList [10, 20, 30])
 -- >>> res
 -- >>> let (dr1, tr1) = runInteraction tr $ mconcat $ map injDelta [ADFst $ SIns 3 (S $ Seq.fromList [4])]
@@ -826,5 +869,4 @@ testCode proxy = compile $ runMonoWith proxy $ \xs -> cartesian (fstF xs) (sndF 
 -- DS [SDel 0 3]
 -- DS [SIns 3 (S {unS = fromList [(1,40)]}),SIns 7 (S {unS = fromList [(2,40)]}),SIns 11 (S {unS = fromList [(3,40)]})]
 -- DS [SDel 0 1,SDel 2 1,SDel 4 1]
-
 

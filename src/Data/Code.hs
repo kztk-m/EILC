@@ -9,6 +9,8 @@ import           Data.Delta          (Delta, Diff)
 import           Data.Function       ((&))
 import qualified Language.Haskell.TH as TH
 
+import           Data.Env
+
 type Code a = TH.Q (TH.TExp a)
 
 newtype CodeC a = CodeC { runCodeC :: forall r. (a -> Code r) -> Code r }
@@ -42,3 +44,8 @@ newtype PackedCode a = PackedCode { getCode :: Code a }
 data PackedCodeDelta a where
   PackedCodeDelta :: Diff a => Code (Delta a) -> PackedCodeDelta a
 
+mkLetEnv :: Env PackedCode aa -> CodeC (Env PackedCode aa)
+mkLetEnv = mapEnvA (\(PackedCode c) -> PackedCode <$> mkLet c)
+
+mkLetEnvD :: Env PackedCodeDelta aa -> CodeC (Env PackedCodeDelta aa)
+mkLetEnvD = mapEnvA (\(PackedCodeDelta c) -> PackedCodeDelta <$> mkLet c)

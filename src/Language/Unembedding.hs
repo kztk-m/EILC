@@ -229,7 +229,8 @@ class Term cat term => LetTerm cat term where
   letTerm :: (AllIn s (K cat), K cat a, K cat b) => term s a -> term (a ': s) b -> term s b
 
 class LetTerm cat term => FunTerm cat (term :: [k] -> k -> Type) where
-  type IHom cat (a :: k) (b :: k) :: k
+--  type IHom cat (a :: k) (b :: k) :: k
+  type IHom cat :: k -> k -> k
   lamTerm   :: (AllIn s (K cat), K cat a, K cat b) => term (a : s) b -> term s (IHom cat a b)
   appTerm   :: (AllIn s (K cat), K cat a, K cat b) => term s (IHom cat a b) -> term s a -> term s b
 --  unlamTerm :: (AllIn s (K cat), K cat a, K cat b) => term s (IHom cat a b) -> term (a : s) b

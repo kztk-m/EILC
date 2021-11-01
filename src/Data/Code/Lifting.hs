@@ -92,18 +92,26 @@ type family Flatten' cs r where
   Flatten' ('NEOne c) r = c ': r
   Flatten' ('NEJoin cs1 cs2) r = Flatten' cs1 (Flatten' cs2 r)
 
+enilOfIdentity :: Env Identity '[]
+enilOfIdentity = ENil
+{-# INLINE enilOfIdentity #-}
+
 conn2cenv :: Conn PackedCode cs -> Code (Env Identity (Flatten cs))
-conn2cenv CNone    = [|| ENil ||]
-conn2cenv (CNE cs) = conn2cenv' cs [|| ENil ||]
+conn2cenv CNone    = [|| enilOfIdentity ||]
+conn2cenv (CNE cs) = conn2cenv' cs [|| enilOfIdentity ||]
 
 conn2cenv' :: NEConn PackedCode cs -> Code (Env Identity rs) -> Code (Env Identity (Flatten' cs rs))
 conn2cenv' (COne (PackedCode c)) r = [|| ECons (Identity $$c) $$r ||]
 conn2cenv' (CJoin c1 c2) r         = conn2cenv' c1 (conn2cenv' c2 r)
 
+seqENil :: Env f '[] -> a -> a
+seqENil ENil a = a
+
 cenv2conn :: forall cs r proxy. Conn proxy cs -> Code (Env Identity (Flatten cs)) -> (Conn PackedCode cs -> Code r) -> Code r
-cenv2conn CNone  env k = [|| case $$env of { ENil -> $$(k CNone) } ||]
+cenv2conn CNone  env k = [|| $$env `seqENil` $$(k CNone) ||]
 cenv2conn (CNE (p :: NEConn proxy cs')) env k = cenv2conn' @cs' @'[] @r p env $ \c env' ->
-  [|| case $$env' of { ENil -> $$(k (CNE c)) } ||]
+  [|| $$env' `seqENil` $$(k (CNE c)) ||]
+  -- [|| case $$env' of { ENil -> $$(k (CNE c)) } ||]
 
 cenv2conn' :: forall cs ds r proxy. NEConn proxy cs -> Code (Env Identity (Flatten' cs ds)) -> (NEConn PackedCode cs -> Code (Env Identity ds) -> Code r) -> Code r
 cenv2conn' (COne _) env k =
@@ -166,4 +174,12 @@ witTypeable' :: NEConn WitTypeable cs -> Wit (Typeable r) -> Wit (Typeable (Flat
 witTypeable' (COne WitTypeable) Wit = Wit
 witTypeable' (CJoin c1 c2) wit      = witTypeable' c1 (witTypeable' c2 wit)
 
+witTypeableConn :: Conn WitTypeable cs -> Wit (Typeable (Flatten cs), Typeable cs)
+witTypeableConn CNone = Wit
+witTypeableConn (CNE cs) = case witTypeableConn' cs (Wit :: Wit (Typeable '[])) of Wit -> Wit
 
+witTypeableConn' :: forall cs r. NEConn WitTypeable cs -> Wit (Typeable r) -> Wit (Typeable (Flatten' cs r), Typeable cs)
+witTypeableConn' (COne WitTypeable) Wit = Wit
+witTypeableConn' (CJoin (c1 :: NEConn WitTypeable as) (c2 :: NEConn WitTypeable bs)) wit = case witTypeableConn' c2 wit of
+   Wit -> case witTypeableConn' c1 (Wit @(Typeable (Flatten' bs r))) of
+     Wit -> Wit

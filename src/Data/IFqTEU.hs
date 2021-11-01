@@ -39,8 +39,8 @@ data SBool b where
   SFalse :: SBool 'False
 
 type family Extr (as :: [k]) (bs :: [Bool]) :: [ k ] where
+  Extr _as '[] = '[]
   Extr '[] _us = '[]
-  Extr (a ': as) '[] = '[]
   Extr (a ': as) ('True ': us) = a ': Extr as us
   Extr (a ': as) ('False ': us) = Extr as us
 
@@ -158,6 +158,10 @@ type family CSing (cs :: Tree k) (as :: [k]) (bs :: [Bool]) :: Tree k where
 type family SafeTail (as :: [k]) :: [k] where
   SafeTail '[] = '[]
   SafeTail (a ': as) = as
+
+safeTail :: Env f as -> Env f (SafeTail as)
+safeTail ENil         = ENil
+safeTail (ECons _ xs) = xs
 
 extendEnv ::
   Env Proxy as -> Env SBool us2
