@@ -116,8 +116,7 @@ cenv2conn (CNE (p :: NEConn proxy cs')) env k = cenv2conn' @cs' @'[] @r p env $ 
 cenv2conn' :: forall cs ds r proxy. NEConn proxy cs -> Code (Env Identity (Flatten' cs ds)) -> (NEConn PackedCode cs -> Code (Env Identity ds) -> Code r) -> Code r
 cenv2conn' (COne _) env k =
   [||
-    let x = headEnv $$env
-        xs = tailEnv $$env
+    let (x, xs) = headTailEnv $$env
     in $$( k (COne (PackedCode [|| runIdentity x ||])) [|| xs ||] )
   ||]
 cenv2conn' (CJoin p1 p2) env k =

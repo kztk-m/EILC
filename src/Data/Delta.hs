@@ -61,6 +61,11 @@ class Monoid (Delta a) => Diff a where
   checkEmpty = foldrDelta (\_ _ -> False) True
   {-# INLINABLE checkEmpty #-}
 
+  -- Especially for functions, empty update is not unique and cannot be obtained of the air.
+  emptify :: Delta a -> Delta a
+  default emptify :: Monoid (Delta a) => Delta a -> Delta a
+  emptify = const mempty
+
 -- The following definitions are taken from Data.Foldable
 foldrDelta :: HasAtomicDelta a => (AtomicDelta a -> b -> b) -> b -> Delta a -> b
 foldrDelta f z t = appEndo (monoidMap (Endo #. f) t) z
@@ -70,7 +75,7 @@ foldl'Delta :: HasAtomicDelta a => (b -> AtomicDelta a -> b) -> b -> Delta a -> 
 foldl'Delta f z0 xs = foldrDelta f' id xs z0
       where f' x k z = k $! f z x
 {-# INLINE foldl'Delta #-}
-class Diff a => HasAtomicDelta a where
+class (Monoid (Delta a), Diff a) => HasAtomicDelta a where
   data family AtomicDelta a :: Type
 
   monoidMap :: Monoid m => (AtomicDelta a -> m) -> Delta a -> m
@@ -122,6 +127,9 @@ instance (Diff a, Diff b) => Diff (a, b) where
   {-# INLINE (/+) #-}
 
   checkEmpty (PairDelta da db) = checkEmpty da && checkEmpty db
+
+  emptify (PairDelta da db) = PairDelta (emptify da) (emptify db)
+
 instance (Semigroup (Delta a), Semigroup (Delta b)) => Semigroup (Delta (a, b)) where
   PairDelta da1 db1 <> PairDelta da2 db2 = PairDelta (da1 <> da2) (db1 <> db2)
   {-# INLINE (<>) #-}
@@ -160,6 +168,8 @@ instance Diff a => Diff (Identity a) where
   Identity a /+ (IdentityDelta da) = Identity (a /+ da)
 
   checkEmpty (IdentityDelta da) = checkEmpty da
+
+  emptify = coerce (emptify :: Delta a -> Delta a)
 
 instance HasAtomicDelta a => HasAtomicDelta (Identity a) where
   newtype instance AtomicDelta (Identity a) = ADIdentity { runADIdentity :: AtomicDelta a }

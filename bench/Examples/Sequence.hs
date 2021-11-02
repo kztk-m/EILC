@@ -853,7 +853,7 @@ testCodeHO :: (K cat ~ DiffTypeable, MapAPI cat term, FunTerm cat term, IHom cat
 testCodeHO proxy = compile $ runMonoWith proxy $ \xs -> cartesianHO (fstF xs) (sndF xs)
 
 
--- >>> let f = $$( testCode $ Proxy @IFqTE )
+-- >>> let f = $$( testCode $ Proxy @IFqT )
 -- >>> let (res, tr) = f (S $ Seq.fromList [1,2,3], S $ Seq.fromList [10, 20, 30])
 -- >>> res
 -- >>> let (dr1, tr1) = runInteraction tr $ mconcat $ map injDelta [ADFst $ SIns 3 (S $ Seq.fromList [4])]

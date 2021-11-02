@@ -9,6 +9,7 @@
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE BangPatterns          #-}
 module Data.Incrementalized.Function (
     toDynI, fromDynI, trDFunT,
     FunT(..), type Delta (..), IsEmpty(..),
@@ -17,15 +18,19 @@ module Data.Incrementalized.Function (
 import           Data.Code
 import           Data.Code.Lifting
 import           Data.Conn
-import           Data.Delta            (Delta (PairDelta), Diff (..))
+import           Data.Delta            (Delta (PairDelta), Diff (..), pairDelta)
 import           Data.Dynamic          (Dynamic, fromDynamic, toDyn)
-import           Data.Env              (Env (..), mapEnv)
+import           Data.Env              (Env (..), headTailEnv, mapEnv)
 import           Data.Functor.Identity (Identity (..))
-import           Data.IFq              (IFqS (..))
+import           Data.IFq              (IFqS (..), ensureDiffType,
+                                        mkInteraction)
 import           Data.IFqT             (IFqT (..))
 import           Data.IFqTEU
+import           Data.Incrementalized  (IncrementalizedQ (fromStateless))
+import           Data.Interaction      (Interaction (Interaction))
 import           Data.Maybe            (fromJust, fromMaybe, isJust)
 import           Data.Typeable         (Typeable, eqT, type (:~:) (..))
+import           Debug.Trace           (trace)
 import           Language.Unembedding  hiding (Fun)
 
 {-
@@ -182,6 +187,10 @@ instance (Diff a, Diff b) => Diff (FunT a b) where
   checkEmpty (DFunT Empty _ _)      = True
   checkEmpty (DFunT Unk _ _)        = False
 
+  emptify (DFunT FromMEmpty _ df) = DFunT FromMEmpty (\c -> (mempty, c)) df
+  emptify (DFunT _ _ df)          = DFunT Empty (\c -> (mempty, c)) df
+
+
 
 allEmptyDelta :: forall xs. Env PackedCodeDelta xs -> Code Bool
 allEmptyDelta ENil = [|| True ||]
@@ -209,7 +218,7 @@ cLamT (IFqT (ECons _ tenv) (sh :: Conn WitTypeable cs) m) = IFqT tenv CNone $
                           -- For typing
                           c  <- mkLet [|| fromDynI d ||]
                           cs <- CodeC $ cenv2conn sh c
-                          denv' <- mkLetEnvD $ mapEnv (\(PackedCodeDelta de) -> PackedCodeDelta [|| if isJust maybe_da then mempty else $$de ||]) denv
+                          denv' <- mkLetEnvD $ mapEnv (\(PackedCodeDelta de) -> PackedCodeDelta [|| maybe Prelude.id (const emptify) maybe_da $$de ||]) denv
                           da'   <- mkLet [|| fromMaybe mempty maybe_da ||]
                           (db, cs') <- tr (ECons (PackedCodeDelta da') denv') cs
                           return [|| ($$db, toDynI $$(conn2cenv cs')) ||] ) ||]
@@ -221,11 +230,11 @@ cLamT (IFqT (ECons _ tenv) (sh :: Conn WitTypeable cs) m) = IFqT tenv CNone $
         --                     return [|| ($$db, toDyn $$(conn2cenv cs')) ||]) ||]
       let
         f' env = do
-            ff <- mkLet [|| FunT $$(h env) ||]
+            let ff = [|| FunT $$(h env) ||]
             return (ff, CNone)
         tr' denv _ = do
           trfunc <- mkLet $ trH denv
-          ftr <- mkLet [|| DFunT (if $$(allEmptyDelta denv) then Empty else Unk) ($$trfunc Nothing) ($$trfunc Prelude.. Just) ||]
+          let ftr = [|| DFunT (if $$(allEmptyDelta denv) then Empty else Unk) ($$trfunc Nothing) ($$trfunc Prelude.. Just) ||]
           return (ftr, CNone)
       return (f', tr')
     where
@@ -233,7 +242,7 @@ cLamT (IFqT (ECons _ tenv) (sh :: Conn WitTypeable cs) m) = IFqT tenv CNone $
       wit = witTypeableFlatten sh
 
 opAppT :: forall a b. Diff b => IFqS (FunT a b, a) b
-opAppT = IFqS sh $ do
+opAppT = IFqS sh $
   return (f, tr)
   where
     sh :: Conn WitTypeable ('NE ('NEOne Dynamic))
@@ -254,7 +263,7 @@ opAppT = IFqS sh $ do
     tr dp (CNE (COne (PackedCode c))) = do
       (db, c') <- CodeC $ \k ->
                   [|| let PairDelta dfunT da = $$dp
-                          (db, c') = trDFunT dfunT da $$c
+                          (!db, c') = trDFunT dfunT da $$c
                       in $$(k ([|| db ||], [|| c' ||]) ) ||]
       return (db, CNE $ COne $ PackedCode c')
 
@@ -263,6 +272,106 @@ instance FunTerm IFqS IFqT where
   lamTerm = cLamT
   appTerm e1 e2 = mapTerm opAppT $ multTerm e1 e2
 
+
+-- problematic :: (K cat a, K cat (IHom cat a a), App2 cat term e, FunTerm cat term) => e a -> e a
+problematic x0 =
+  -- (lam (\f -> lam $ \x -> f `app` (f `app` x)) `app` lam (\f -> lam $ \x -> f `app` (f `app` x))) `app` lam (lift incC) `app` x0
+  lam (\f -> lam $ \x -> f `app` (f `app` x)) `app` lam (lift incC) `app` x0
+  where
+    incC = fromStateless (\x -> [|| succ $$x ||]) Prelude.id
+
+spliced :: (Int -> (Int, Interaction (Delta Int) (Delta Int)))
+spliced =
+    ensureDiffType (\ pa_aWdc pb_aWdd a_aWde
+            -> let
+                 twice_inc --twice
+                   = (FunT
+                        (\ a_aWdg -- f
+                           -> (FunT
+                                 (\ a_aWdh -- x
+                                    -> let _v_aWdi = (a_aWdg, a_aWdh)
+                                       in
+                                         case _v_aWdi of {
+                                           (FunT ff_aWdj, a_aWdk)
+                                             -> let (b_aWdl, c_aWdm) = ff_aWdj a_aWdk in
+                                                let _v_aWdn = (a_aWdg, b_aWdl)
+                                                in
+                                                  case _v_aWdn of {
+                                                    (FunT ff_aWdo, a_aWdp)
+                                                      -> let (b_aWdq, c_aWdr) = ff_aWdo a_aWdp
+                                                         in (b_aWdq, toDyn (ECons (Identity c_aWdm) (ECons (Identity c_aWdr) enilOfIdentity))) } }),
+                               toDyn enilOfIdentity)),
+                      FunT (\ a_aWds -> let _v_aWdt = succ a_aWds in (_v_aWdt, toDyn enilOfIdentity)))
+               in
+                 case twice_inc of {
+                   (FunT ff_twice, f_inc)
+                     -> let (b_aWdw, c_aWdx) = ff_twice f_inc in
+                        let _v_aWdy = (b_aWdw, a_aWde)
+                        in
+                          case _v_aWdy of {
+                            (FunT ff_twice_inc, a_aWdA)
+                              -> let (b_aWdB, c_aWdC) = ff_twice_inc a_aWdA
+                                 in
+                                   (b_aWdB,
+                                    let
+                                      loop
+                                        = \ !a_aWdE !a_aWdF -> mkInteraction pa_aWdc pb_aWdd (\ da
+                                                            -> let
+                                                                 _v_aWdH
+                                                                   = \ maybe_df d_aWdJ
+                                                                       -> let _v_aWdK = fromDynI d_aWdJ
+                                                                          in
+                                                                            (_v_aWdK
+                                                                               `seqENil`
+                                                                                 (let _v_aWdL = maybe Prelude.id (const emptify) maybe_df da in
+                                                                                  let df' = fromMaybe mempty maybe_df in -- mempty comes here
+                                                                                  let
+                                                                                    _v_aWdN
+                                                                                      = \ maybe_da_aWdO d_aWdP
+                                                                                          -> let _v_aWdQ = fromDynI d_aWdP in
+                                                                                             let (x_aWdR, xs_aWdS) = headTailEnv _v_aWdQ in
+                                                                                             let (x_aWdT, xs_aWdU) = headTailEnv xs_aWdS
+                                                                                             in
+                                                                                               (xs_aWdU
+                                                                                                  `seqENil`
+                                                                                                    (let _v_aWdV = maybe Prelude.id (const emptify) maybe_da_aWdO _v_aWdL in
+                                                                                                     let _v_aWdW = maybe Prelude.id (const emptify) maybe_da_aWdO df' in -- mempty goes here
+                                                                                                     let _v_aWdX = fromMaybe mempty maybe_da_aWdO in
+                                                                                                     let _v_aWdY = pairDelta _v_aWdW _v_aWdX in
+                                                                                                     let
+                                                                                                       PairDelta dfunT_aWdZ da_aWe0 = _v_aWdY
+                                                                                                       (!db_aWe1, c'_aWe2) = trace ("da_aWe0: " ++ show da_aWe0) $ trDFunT dfunT_aWdZ da_aWe0 (runIdentity x_aWdR) in
+                                                                                                     let _v_aWe3 = pairDelta _v_aWdW db_aWe1 in
+                                                                                                     let
+                                                                                                       PairDelta dfunT_aWe4 da_aWe5 = _v_aWe3
+                                                                                                       (!db_aWe6, c'_aWe7) = trDFunT dfunT_aWe4 da_aWe5 (runIdentity x_aWdT)
+                                                                                                     in (db_aWe6, toDynI (ECons (Identity c'_aWe2) (ECons (Identity c'_aWe7) enilOfIdentity)))))
+                                                                                  in
+                                                                                    (DFunT (if checkEmpty df' && checkEmpty _v_aWdL then Empty else Unk) (_v_aWdN Nothing)
+                                                                                       (_v_aWdN Prelude.. Just),
+                                                                                     toDynI enilOfIdentity))) in
+                                                               let
+                                                                 _v_aWe8
+                                                                   = \ maybe_da_aWe9 d_aWea
+                                                                       -> let _v_aWeb = fromDynI d_aWea
+                                                                          in
+                                                                            (_v_aWeb
+                                                                               `seqENil`
+                                                                                 (let _v_aWec = maybe Prelude.id (const emptify) maybe_da_aWe9 da in
+                                                                                  let _v_aWed = fromMaybe mempty maybe_da_aWe9 in let _v_aWee = _v_aWed in (_v_aWee, toDynI enilOfIdentity))) in
+                                                               let
+                                                                 _v_aWef
+                                                                   = pairDelta (DFunT (if checkEmpty da then Empty else Unk) (_v_aWdH Nothing) (_v_aWdH Prelude.. Just))
+                                                                       (DFunT (if checkEmpty da then Empty else Unk) (_v_aWe8 Nothing) (_v_aWe8 Prelude.. Just)) in
+                                                               let
+                                                                 PairDelta dfunT_aWeg da_aWeh = _v_aWef
+                                                                 (!db_aWei, c'_aWej) = trDFunT dfunT_aWeg da_aWeh a_aWdE in
+                                                               let _v_aWek = pairDelta db_aWei da in
+                                                               let
+                                                                 PairDelta dfunT_aWel da_aWem = _v_aWek
+                                                                 (!db_aWen, c'_aWeo) = trDFunT dfunT_aWel da_aWem a_aWdF
+                                                               in (db_aWen, loop c'_aWej c'_aWeo))
+                                    in loop c_aWdx c_aWdC) } })
 
 
 -- applyDeltaFunT f (DFunT FromMEmpty _) = f

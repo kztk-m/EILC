@@ -549,7 +549,7 @@ Also, since we have `f ⊕ df ⊕ df' = (f ⊕ df) ⊕ df'`, we have:
          (db2, c') = df2 da c2
      in (b ⊕ db1 ⊕ db2, c') 
 
-- [ ] Check this more carefully. 
+- [x] Check this more carefully. 
 
 Thus, the net effect is the same with the definition below: 
 
@@ -559,3 +559,104 @@ Thus, the net effect is the same with the definition below:
                    in (db1 ⊕ db2, c2) 
 
 Here, `df` satisfying `df 0 c = (0, c)` is called nil change, as it satisfies `f ⊕ df = f`. 
+
+------------------
+
+**2021-11-02** Function objects obtained as above is not that useful, because it does not support separation of updates (`da = da1 ⊕ da2`). I think this is a problem intrinsic to the original calculus so I here use the original formalism for simplicity. 
+
+In the original calculus, `Δ(a -> b) = a -> Δa -> Δb`, but this does not mean that the corresponding delta is a derivative. Instead, in general, what we have is only: 
+
+    (f ⊕ df) (a ⊕ da) = f a ⊕ df a da 
+
+As a special case, we have 
+
+    (f ⊕ df) a = f a ⊕ df a 0 
+
+Hence, `df` is a derivative of `f` only when `df a 0 = 0` and thus `(f ⊕ df) a = f a`. This is roughly because `df` involves an effect of changes to free variables in `f`. 
+
+However, here comes an issue. In practice, we want to define a set `Δa` of updates as a sequence of atomic updates and consider translation of such small updates. This is not possible for `df` as 
+
+    df a (da ⊕ da') 
+
+is not necessarily equal to 
+
+    df a da ⊕ df (a ⊕ da) da' 
+
+as `df` may not be a nil change. Especially, we do not have 
+
+    df a 0 = df a 0 ⊕ df a 0 
+
+for such an `a` that `df a 0 /= 0`. 
+
+Let us consider a concrete example of `map`. Let us assume for simplicity that updates are only compositions of in-place updates such as `At i da`. How can we reflect `[At i da]`? It is not correct if we return `At i (df ai da)` where `ai` is the ith element of the original sequence, because `df` contains the change to `f` itself. So, the correct result actually is the sequence of updates: 
+
+    [At 0 (df a0 0), ..., 
+     At (i-1) (df a(i-1) 0), At i (df a 0), At (i+1) (df a(i+1) 0), ...]
+
+This suggests that we losed the compositionality here: the translation results of `[At i da]` and `[At j db]` do not compose to produce the translation result of `[At i da, At j db]`. Fortunately, for this map and this set of updates, we can compute some canonical form of updates and then translate it. But, this is not necessarily possible in general. 
+
+So, in the original calculus, higher-order API is useful only when `df` is an nil update. 
+
+Giarrusso et al.'s addresses the issue by considering closures explicitly. In this context, we can simply view the approach as one that separates `df` into 
+
+   * `dfNN`: a reaction to updates on free variables in `f`.  
+   * `df0`: a reaction to updates on `f`'s argument, assuming there are no updates on free variables, which is a derivative of `f`. 
+
+such a way that `df a da = dfNN a ⊕ df0 a da`. 
+
+Now the translation of `[At i da]` is written as 
+
+    [At 0 (dfNN a0), At 1 (dfNN a1), ... ] ++ [At i (df0 ai da)] 
+
+and the translation result of `[At i da, At j db]` is obtained as: 
+
+    [At 0 (dfNN a0), At 1 (dfNN a1), ... ] ++ [At i (df0 ai da), At j (df0 aj db)]
+
+(We assumed `i /= j`. If `i = j`, we should use `(ai ⊕ df0 ai da)` instead of `aj`). 
+
+Looks good? But a pitfall comes when we construct `dfNN` and `df0`. Very roughly speaking, they are obtained as a semantic function to handle 
+
+    Γ , x : A ⊢ e : B 
+    ------------------
+    Γ ⊢ λx. e : A -> B
+
+that is 
+
+    (h :: Γ × A -> B) × (dh :: Γ × A -> ΔΓ x ΔA -> ΔB) 
+    ---------------------------------------------------
+    (l :: Γ -> A -> B) × (dl :: Γ -> ΔΓ -> (A -> ΔB) × (A -> ΔA -> ΔB)) 
+
+Here, we have
+
+    dl θ dθ = (\a -> dh (θ, a) (dθ, 0)，\a da -> dh (θ ⊕ dθ, a) (0, da))
+
+Then, how we can construct 0 out of the air? For first-order datatypes, it is usually a part of definition of `Δa`, especially when `Δa` can be decomposed into sequence of atomic updates. However, for functions, we are not able to construct such a term out of the air as they are derivatives.
+
+An observation is that we can "nullify" a function delta as: 
+
+    nullify (_, df) = (const 0, df) 
+
+when the range type is not a function. However, to do so `dfNN` must take a `Δa` to be nullified. If we allow `dfNN` to take `Δa` values that have been nullified, we can avoid the issue of nullification as: 
+
+    -- df is derivative and thus maps empty change to empty change
+    nullify (_, df) = (df, df)
+    
+Then, the application of `dfNN` and `df0` can be defined via: `df a da = dfNN a (nullify da) ⊕ df0 a da`. Here, composition of `(dfNN, df0)` and `(dfNN', df0')` is defined as 
+
+     (\a da0 -> dfNN a da0 ⊕ dfNN' a da0, 
+      \a da -> df a da ⊕ df (a ⊕ da) da)
+
+assuming that `da0` is always a null change. **(Really?)**
+
+Function application is defined via 
+
+    -----------------------------------------------------------------------------------
+    ((A -> B) × A -> B) × ((A -> B) × A -> (A -> ΔA -> ΔB) × (A -> ΔA -> ΔB) × ΔA -> ΔB)
+
+where the latter part is defined as 
+
+    dapp (f, a) (dfNN, df0, da) = dfNN a (nullify da) ⊕ df0 a da 
+
+- [ ] Check this works for our setting. 
+
+
