@@ -288,10 +288,10 @@ infixr 5 @+
 
 
 class MapAPI cat term | term -> cat where
-  mapAPI :: (K cat a, K cat b, AllIn s (K cat)) => term (a ': s) b -> term (S a ': s) (S b)
+  mapAPI :: (K cat ~ DiffTypeable, DiffTypeable a, DiffTypeable b, AllIn s DiffTypeable, Monoid (Delta a)) => term (a ': s) b -> term (S a ': s) (S b)
 
 mapTr ::
-  (Diff a, Diff b)
+  (Diff a, Monoid (Delta a), Diff b)
   => (a -> (b, c)) -> (Bool -> Delta a -> c -> (Delta b, c))
   -> Seq c -> Delta (S a) -> (Delta (S b), Seq c )
 mapTr f dfb !cs ds =
@@ -364,32 +364,32 @@ type MapC s cs =
 instance MapAPI IFqS IFqT where
   mapAPI = cMapT
 
-cMapT :: forall s a b. (Diff a, Typeable a, Diff b) => IFqT (a ': s) b -> IFqT (S a ': s) (S b)
+cMapT :: forall s a b. (Monoid (Delta a), Diff a, Typeable a, Diff b, AllIn s DiffTypeable) => IFqT (a ': s) b -> IFqT (S a ': s) (S b)
 cMapT (IFqT (ECons _ tenv) (sh :: Conn WitTypeable cs) m) = IFqT (ECons WitTypeable tenv) sh' $ do
   (f, tr) <- m
   let
-    h :: Env PackedCode s -> Code (a -> (b, EncCS cs))
+    h :: Env PackedCodeDiff s -> Code (a -> (b, EncCS cs))
     h env = [||
-        \a -> $$( runCodeC (f (ECons (PackedCode [|| a ||]) env)) $ \(b, c') -> [|| ($$b, $$(conn2cenv c')) ||])
+        \a -> $$( runCodeC (f (ECons (PackedCodeDiff [|| a ||]) env)) $ \(b, c') -> [|| ($$b, $$(conn2cenv c')) ||])
       ||]
   func :: Code (EFunc s (a -> (b, EncCS cs))) <-
-    mkLet (mkAbsE tenv $ \env -> h env)
+    mkLet (mkAbsED tenv $ \env -> h env)
   let
     f' ::
-      Env PackedCode (S a ': s)
+      Env PackedCodeDiff (S a ': s)
       -> CodeC (Code (S b), Conn PackedCode (MapC s cs))
-    f' (ECons (PackedCode as) env) = do
+    f' (ECons (PackedCodeDiff as) env) = do
       (bs, cs) <- CodeC $ \k -> [||
-            let (bs, cs) = Seq.unzip $ fmap $$(mkAppE @s @(a -> (b, EncCS cs)) func env)  (unS $$as)
+            let (bs, cs) = Seq.unzip $ fmap $$(mkAppED @s @(a -> (b, EncCS cs)) func env)  (unS $$as)
             in $$(k ([|| S bs ||], CNE $ COne $ PackedCode [|| cs ||]))
         ||]
-      return (bs, joinConn cs $ convertEnv env)
+      return (bs, joinConn cs $ convertEnv $ mapEnv (\(PackedCodeDiff a) -> PackedCode a) env)
 
 
     trh :: Env PackedCodeDelta s -> Conn WitTypeable cs -> Code (Bool -> Delta a -> EncCS cs -> (Delta b, EncCS cs))
     trh env pcs = [|| \b da c ->
       $$(cenv2conn pcs [|| c ||] $ \cs -> toCode $ do
-          env' <- mkLetEnvD $ mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) env
+          env' <- mkLetEnvD $ mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else emptify $$cdx ||]) env
           (db, cs') <- tr (ECons (PackedCodeDelta [|| da ||]) env') cs
           return [|| ($$db, $$(conn2cenv cs') ) ||])
       ||]
@@ -429,7 +429,7 @@ instance MapAPI IFq IFqTE where
 
 cMapTE ::
   forall s a b.
-  (Diff a, Typeable a, Diff b) => IFqTE (a ': s) b -> IFqTE (S a ': s) (S b)
+  (Diff a, Typeable a, Monoid (Delta a),  Diff b) => IFqTE (a ': s) b -> IFqTE (S a ': s) (S b)
 cMapTE (IFqTE (ECons _ tenv) (sh :: Conn WitTypeable cs) f tr)
   = IFqTE (ECons Proxy tenv) sh' f' tr'
   where
@@ -454,7 +454,7 @@ cMapTE (IFqTE (ECons _ tenv) (sh :: Conn WitTypeable cs) f tr)
     trh :: Env PackedCode s -> Env PackedCodeDelta s -> Conn proxy cs -> Code (Bool -> Delta a -> (a, EncCS cs) -> (Delta b, (a, EncCS cs)))
     trh env denv pcs = [|| \b da (a, c) ->
       $$(cenv2conn pcs [|| c ||] $ \cs ->
-        let denv' = mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
+        let denv' = mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else emptify $$cdx ||]) denv
         in runCodeC (tr (ECons (PackedCode [|| a ||]) env) (ECons (PackedCodeDelta [|| da ||]) denv') cs) $ \(db, cs') ->
           [|| ($$db, (a /+ da, $$(conn2cenv cs') )) ||])
       ||]
@@ -478,7 +478,7 @@ allEmptyDeltaEnv (ECons (PackedDelta d) ds) = checkEmpty d && allEmptyDeltaEnv d
 
 mkMapInt ::
   forall s a b.
-  (Diff a, Diff b) =>
+  (Monoid (Delta a), Diff a, Diff b) =>
   Code (Env Identity s)
   -> Code (Env Identity s -> a -> (b, Interaction (Env PackedDelta (a ': s)) (Delta b)))
   -> Code (Env PackedDelta s -> Bool -> Delta a -> Interaction (Env PackedDelta (a ': s)) (Delta b) -> (Delta b, Interaction (Env PackedDelta (a ': s)) (Delta b)))
@@ -497,7 +497,7 @@ mkMapInt env h' trh c0 = CodeC $ \k -> [||
 instance MapAPI IFF IFFT where
   mapAPI = cMapF
 
-cMapF :: forall s a b. (Diff a, Diff b) => IFFT (a ': s) b -> IFFT (S a ': s) (S b)
+cMapF :: forall s a b. (Monoid (Delta a), Diff a, Diff b) => IFFT (a ': s) b -> IFFT (S a ': s) (S b)
 cMapF (IFFT (ECons _ tenv) h) = IFFT (ECons Proxy tenv) $ \(ECons (PackedCode as) env) -> do
   let cenv = packEnv env
   h'' <- shareNonGen mkH
@@ -513,11 +513,11 @@ cMapF (IFFT (ECons _ tenv) h) = IFFT (ECons Proxy tenv) $ \(ECons (PackedCode as
 
     trh :: Code (Env PackedDelta s -> Bool -> Delta a -> Interaction (Env PackedDelta (a ': s)) (Delta b) -> (Delta b, Interaction (Env PackedDelta (a ': s)) (Delta b)))
     trh = [|| \denv doesUpdateEnv da i ->
-                      let denv' = if doesUpdateEnv then denv else mapEnv (\(PackedDelta _) -> PackedDelta mempty) denv
+                      let denv' = if doesUpdateEnv then denv else mapEnv (\(PackedDelta d) -> PackedDelta $ emptify d) denv
                       in runInteraction i (ECons (PackedDelta da) denv') ||]
 
 
-mapF :: forall cat term e a b. (MapAPI cat term, LetTerm cat term, App2 cat term e, K cat ~ DiffTypeable, Diff a, Typeable a, Diff b, Typeable b) => (e a -> e b) -> e (S a) -> e (S b)
+mapF :: forall cat term e a b. (MapAPI cat term, LetTerm cat term, App2 cat term e, K cat ~ DiffTypeable, Diff a, Typeable a, Monoid (Delta a), Diff b, Typeable b) => (e a -> e b) -> e (S a) -> e (S b)
 mapF = flip (liftSO2 (Proxy @'[ '[], '[a] ]) $ \e1 e2 -> letTerm e1 (mapAPI e2))
 
 
@@ -527,52 +527,53 @@ fstF = lift $ fromStateless (\a -> [|| fst $$a ||]) (\dz -> [|| fstDelta $$dz||]
 sndF :: (IncrementalizedQ c, App2 c t e, K c ~ DiffTypeable, Diff a, Typeable a, Diff b, Typeable b) => e (a, b) -> e b
 sndF = lift $ fromStateless (\a -> [|| snd $$a ||]) (\dz -> [|| sndDelta $$dz ||])
 
-cartesian :: (IncrementalizedQ cat, MapAPI cat term, LetTerm cat term, K cat ~ DiffTypeable, Prod cat a b ~ (a, b), App2 cat term e, Diff a, Typeable a, Diff b, Typeable b) => e (S a) -> e (S b) -> e (S (a, b))
+cartesian :: (IncrementalizedQ cat, MapAPI cat term, LetTerm cat term, K cat ~ DiffTypeable, Prod cat a b ~ (a, b), App2 cat term e, Diff a, Typeable a, Monoid (Delta a), Diff b, Typeable b, Monoid (Delta b)) => e (S a) -> e (S b) -> e (S (a, b))
 cartesian as bs =
   concatMapF (\a -> mapF (pair a) bs) as
   where
     concatMapF f x = concatF (mapF f x)
 
-mapHOF :: FunT a b -> (FunT (S a) (S b), FunT a b)
-mapHOF (FunT f) = (h, FunT f)
+mapHOF :: (Diff a, Diff b, Typeable a) => FunD a b -> (FunD (S a) (S b), FunD a b)
+mapHOF (FunD f df) = (FunD h dh, FunD f df)
   where
-    h = FunT $ \(S as) ->
-          let (bs, cs) = Seq.unzip $ fmap f as
-          in (S bs, toDyn cs)
+    h (S as) =
+        let (bs, cs) = Seq.unzip $ fmap f as
+        in (S bs, (toDyn cs, S as))
 
-mapHOTR :: (Diff a, Diff b) => Delta (FunT a b) -> FunT a b -> (Delta (FunT (S a) (S b)), FunT a b)
-mapHOTR (DFunT Empty _ df) ft@(FunT f) =
-  (DFunT Empty (\d -> (mempty, d)) dfMap, ft)
+    dh das (d, orig) =
+        let Just cs = fromDynamic d
+            (db, cs') = iterTr (mapTrChanged f df) das cs
+        in (db, (toDyn cs', orig))
+
+mapHOTR :: (Diff a, Diff b, Typeable a) => Delta (FunD a b) -> FunD a b -> (Delta (FunD (S a) (S b)), FunD a b)
+mapHOTR (DFunD True _dfNN) ft@(FunD f df) =
+  (DFunD True (\d -> (mempty, d)), ft)
+  -- where
+  --   dfMap das d =
+  --     let Just cs = fromDynamic d
+  --         (db, cs') = iterTr (mapTrChanged f df) das cs
+  --     in (db, toDyn cs')
+mapHOTR dft@(DFunD _ dfNN) ft@(FunD f df) =
+  (DFunD False dfNNMap, ft /+ dft)
   where
-    dfMap das d =
-      let Just cs = fromDynamic d
-          (db, cs') = iterTr (mapTrChanged f df) das cs
-      in (db, toDyn cs')
-mapHOTR dft@(DFunT _ dfNN df) ft@(FunT f) =
-  (DFunT Unk dfNNMap dfMap, ft /+ dft)
-  where
-    dfNNMap d =
+    dfNNMap (d, orig) =
       let Just cs = fromDynamic d
           (db, cs') = mapTrUnchanged dfNN cs
-      in (db, toDyn cs')
+      in (db, (toDyn cs', orig))
 
-    dfMap das d =
-      let Just cs = fromDynamic d
-          (db, cs') = iterTr (mapTrChanged f df) das cs
-      in (db, toDyn cs')
 
 mapHOC :: (IncrementalizedQ cat, Typeable a, Typeable b, Diff a, Diff b)
-         => cat (FunT a b) (FunT (S a) (S b))
+         => cat (FunD a b) (FunD (S a) (S b))
 mapHOC = fromFunctions [|| mapHOF ||] [|| mapHOTR ||]
 
-mapHO :: (K cat (FunT a b), K cat (FunT (S a) (S b)), App2 cat term e, FunTerm cat term, IHom cat ~ FunT, K cat ~ DiffTypeable,
+mapHO :: (K cat (FunD a b), K cat (FunD (S a) (S b)), App2 cat term e, FunTerm cat term, IHom cat ~ FunD, K cat ~ DiffTypeable,
           IncrementalizedQ cat, Typeable a, Typeable b, Diff a, Diff b) =>
           (e a -> e b) -> e (S a) -> e (S b)
 mapHO f x = lift mapHOC (lam f) `app` x
 
 cartesianHO ::
   forall cat term e a b.
-  (IncrementalizedQ cat, FunTerm cat term, IHom cat ~ FunT, K cat ~ DiffTypeable,
+  (IncrementalizedQ cat, FunTerm cat term, IHom cat ~ FunD, K cat ~ DiffTypeable,
    Prod cat a b ~ (a, b), App2 cat term e, Diff a, Typeable a, Diff b, Typeable b)
    => e (S a) -> e (S b) -> e (S (a, b))
 cartesianHO as bs = concatMapHO (\a -> mapHO (pair a) bs) as
@@ -718,19 +719,7 @@ instance MapAPI IFqS IFqTEUS where
   mapAPI = cMapTEUS
 
 
-type family EFunc as r where
-  EFunc '[] r       = r
-  EFunc (a ': as) r = a -> EFunc as r
-
-mkAbsE :: forall as r proxy. Env proxy as -> (Env PackedCode as -> Code r) -> Code (EFunc as r)
-mkAbsE ENil f         = f ENil
-mkAbsE (ECons _ sh) f = [|| \a -> $$(mkAbsE sh (f Prelude.. ECons (PackedCode [|| a ||])) ) ||]
-
-mkAppE :: forall as r. Code (EFunc as r) -> Env PackedCode as -> Code r
-mkAppE f ENil                      = f
-mkAppE f (ECons (PackedCode a) as) = mkAppE [|| $$f $$a ||] as
-
-cMapTEUS :: forall s a b. (Typeable a, Diff a, Diff b) => IFqTEUS (a ': s) b -> IFqTEUS (S a ': s) (S b)
+cMapTEUS :: forall s a b. (Typeable a, Diff a, Monoid (Delta a), Diff b) => IFqTEUS (a ': s) b -> IFqTEUS (S a ': s) (S b)
 cMapTEUS (IFqTEUS (ECons _ tenv) (sh :: Conn WitTypeable  cs) (u :: Env SBool f_us) (ut :: Env SBool tr_us) m)
   = IFqTEUS (ECons Proxy tenv) sh' u' ut' $ do
       (f, tr) <- m
@@ -799,14 +788,14 @@ cMapTEUS (IFqTEUS (ECons _ tenv) (sh :: Conn WitTypeable  cs) (u :: Env SBool f_
           ECons SFalse _ ->
               [|| \b da c ->
                 $$(cenv2conn pcs [|| c ||] $ \cs -> toCode $ do
-                    denv' <- mkLetEnvD $ mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
+                    denv' <- mkLetEnvD $ mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else emptify $$cdx ||]) denv
                     (db, cs') <- tr trenv (extendEnv tenv u (PackedCodeDelta [|| da ||]) denv') cs
                     return [|| ($$db, $$(conn2cenv cs')) ||]
                   ) ||]
           ECons STrue _ ->
               [|| \b da (a, c) ->
                 $$(cenv2conn pcs [|| c ||] $ \cs -> toCode $ do
-                    denv' <- mkLetEnvD $ mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else mempty ||]) denv
+                    denv' <- mkLetEnvD $ mapEnv (\(PackedCodeDelta cdx) -> PackedCodeDelta [|| if b then $$cdx else emptify $$cdx ||]) denv
                     (db, cs') <- tr (extendEnv tenv ut (PackedCode [|| a ||]) trenv) (extendEnv tenv u (PackedCodeDelta [|| da ||]) denv') cs
                     return  [|| ($$db, (a /+ da, $$(conn2cenv cs') )) ||])
               ||]
@@ -849,7 +838,7 @@ type TestCodeType =
 testCode :: (K cat ~ DiffTypeable, MapAPI cat term, LetTerm cat term, Prod cat Int Int ~ (Int, Int), IncrementalizedQ cat, Term cat term) => Proxy term -> TestCodeType
 testCode proxy = compile $ runMonoWith proxy $ \xs -> cartesian (fstF xs) (sndF xs)
 
-testCodeHO :: (K cat ~ DiffTypeable, MapAPI cat term, FunTerm cat term, IHom cat ~ FunT, Prod cat Int Int ~ (Int, Int), IncrementalizedQ cat, Term cat term) => Proxy term -> TestCodeType
+testCodeHO :: (K cat ~ DiffTypeable, MapAPI cat term, FunTerm cat term, IHom cat ~ FunD, Prod cat Int Int ~ (Int, Int), IncrementalizedQ cat, Term cat term) => Proxy term -> TestCodeType
 testCodeHO proxy = compile $ runMonoWith proxy $ \xs -> cartesianHO (fstF xs) (sndF xs)
 
 

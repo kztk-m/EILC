@@ -14,6 +14,7 @@ module Data.Code.Lifting where
 
 import           Data.Code
 import           Data.Conn
+import           Data.Delta            (Delta, Diff, DiffTypeable)
 import           Data.Env
 import           Data.Functor.Identity
 import           Data.Kind             (Type)
@@ -182,3 +183,39 @@ witTypeableConn' (COne WitTypeable) Wit = Wit
 witTypeableConn' (CJoin (c1 :: NEConn WitTypeable as) (c2 :: NEConn WitTypeable bs)) wit = case witTypeableConn' c2 wit of
    Wit -> case witTypeableConn' c1 (Wit @(Typeable (Flatten' bs r))) of
      Wit -> Wit
+
+
+type family EFunc as r where
+  EFunc '[] r       = r
+  EFunc (a ': as) r = a -> EFunc as r
+
+mkAbsE :: forall as r proxy. Env proxy as -> (Env PackedCode as -> Code r) -> Code (EFunc as r)
+mkAbsE ENil f         = f ENil
+mkAbsE (ECons _ sh) f = [|| \a -> $$(mkAbsE sh (f Prelude.. ECons (PackedCode [|| a ||])) ) ||]
+
+mkAbsED :: forall as r proxy. AllIn as DiffTypeable => Env proxy as -> (Env PackedCodeDiff as -> Code r) -> Code (EFunc as r)
+mkAbsED ENil f         = f ENil
+mkAbsED (ECons _ sh) f = [|| \a -> $$(mkAbsED sh (f Prelude.. ECons (PackedCodeDiff [|| a ||])) ) ||]
+
+mkAppE :: forall as r. Code (EFunc as r) -> Env PackedCode as -> Code r
+mkAppE f ENil                      = f
+mkAppE f (ECons (PackedCode a) as) = mkAppE [|| $$f $$a ||] as
+
+
+mkAppED :: forall as r. Code (EFunc as r) -> Env PackedCodeDiff as -> Code r
+mkAppED f ENil                          = f
+mkAppED f (ECons (PackedCodeDiff a) as) = mkAppED [|| $$f $$a ||] as
+
+
+type family DFunc as r where
+  DFunc '[] r       = r
+  DFunc (a ': as) r = Delta a -> DFunc as r
+
+mkAbsD :: forall as r proxy. (AllIn as DiffTypeable) => Env proxy as -> (Env PackedCodeDelta as -> Code r) -> Code (DFunc as r)
+mkAbsD ENil f         = f ENil
+mkAbsD (ECons _ sh) f =
+  [|| \a -> $$(mkAbsD sh (f Prelude.. ECons (PackedCodeDelta [|| a ||])) ) ||]
+
+mkAppD :: forall as r. Code (DFunc as r) -> Env PackedCodeDelta as -> Code r
+mkAppD f ENil                           = f
+mkAppD f (ECons (PackedCodeDelta a) as) = mkAppD [|| $$f $$a ||] as

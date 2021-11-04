@@ -6,7 +6,8 @@
 module Data.IFqT where
 
 import           Data.Code            (Code, CodeC, PackedCode (PackedCode),
-                                       PackedCodeDelta (PackedCodeDelta), mkLet)
+                                       PackedCodeDelta (PackedCodeDelta),
+                                       PackedCodeDiff (..), mkLet)
 import           Data.Delta           (Delta, pairDelta)
 import           Data.Env             (Env (..))
 
@@ -20,7 +21,7 @@ import           Language.Unembedding (LetTerm (..), Term (..))
 data IFqT as b =
   forall cs. IFqT (Env WitTypeable as)
                   (Conn WitTypeable cs)
-                  (CodeC (Env PackedCode as -> CodeC (Code b, Conn PackedCode cs),
+                  (CodeC (Env PackedCodeDiff  as -> CodeC (Code b, Conn PackedCode cs),
                           Env PackedCodeDelta as -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs)))
 
 
@@ -62,7 +63,7 @@ instance Term IFqS IFqT where
 
   var0Term tenv = IFqT (ECons WitTypeable $ convTEnv tenv) CNone $
                     return
-                       (\(ECons (PackedCode a) _) -> return (a, CNone),
+                       (\(ECons (PackedCodeDiff a) _) -> return (a, CNone),
                         \(ECons (PackedCodeDelta da) _) _ -> return (da, CNone))
 
   weakenTerm (IFqT tenv i m) = IFqT (ECons WitTypeable tenv) i $ do
@@ -75,7 +76,7 @@ instance Term IFqS IFqT where
   unliftTerm (IFqT _ i m) = IFqS i $ do
     (f, tr) <- m
     let
-      f'  a  = f  (ECons (PackedCode       a) ENil)
+      f'  a  = f  (ECons (PackedCodeDiff  a) ENil)
       tr' da = tr (ECons (PackedCodeDelta da) ENil)
     return (f' , tr')
 
@@ -88,7 +89,7 @@ instance LetTerm IFqS IFqT where
       f s = do
         (a, c1) <- f1 s
         v <- mkLet a
-        (b, c2) <- f2 (ECons (PackedCode v) s)
+        (b, c2) <- f2 (ECons (PackedCodeDiff v) s)
         return (b, joinConn c1 c2)
 
       tr s cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do

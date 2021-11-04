@@ -1,14 +1,15 @@
-{-# LANGUAGE DefaultSignatures   #-}
-{-# LANGUAGE DerivingStrategies  #-}
-{-# LANGUAGE DerivingVia         #-}
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE FlexibleInstances   #-}
-{-# LANGUAGE KindSignatures      #-}
-{-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving  #-}
-{-# LANGUAGE TypeApplications    #-}
-{-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE DefaultSignatures    #-}
+{-# LANGUAGE DerivingStrategies   #-}
+{-# LANGUAGE DerivingVia          #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE KindSignatures       #-}
+{-# LANGUAGE RankNTypes           #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE StandaloneDeriving   #-}
+{-# LANGUAGE TypeApplications     #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Data.Delta where
 
 -- We want to define a class with
@@ -34,6 +35,7 @@ import           Data.Coerce           (Coercible, coerce)
 import           Data.Functor.Identity
 import           Data.Kind             (Type)
 import           Data.Monoid           (Endo (..), Sum (..))
+import           Data.Typeable         (Typeable)
 
 {-# ANN module "HLint: ignore Use tuple-section" #-}
 
@@ -44,7 +46,7 @@ import           Data.Monoid           (Endo (..), Sum (..))
 
 -- We generally assume that Delta a is a monoid
 data family Delta (a :: Type) :: Type
-class Monoid (Delta a) => Diff a where
+class Semigroup (Delta a) => Diff a where
   -- | Applying delta.
   -- prop> a /+ da /+ da' = a /+ (da <> da')
   (/+) :: a -> Delta a -> a
@@ -65,6 +67,10 @@ class Monoid (Delta a) => Diff a where
   emptify :: Delta a -> Delta a
   default emptify :: Monoid (Delta a) => Delta a -> Delta a
   emptify = const mempty
+
+  emptyOf :: a -> Delta a
+  default emptyOf :: Monoid (Delta a) => a -> Delta a
+  emptyOf = const mempty
 
 -- The following definitions are taken from Data.Foldable
 foldrDelta :: HasAtomicDelta a => (AtomicDelta a -> b -> b) -> b -> Delta a -> b
@@ -129,6 +135,7 @@ instance (Diff a, Diff b) => Diff (a, b) where
   checkEmpty (PairDelta da db) = checkEmpty da && checkEmpty db
 
   emptify (PairDelta da db) = PairDelta (emptify da) (emptify db)
+  emptyOf (a, b) = PairDelta (emptyOf a) (emptyOf b)
 
 instance (Semigroup (Delta a), Semigroup (Delta b)) => Semigroup (Delta (a, b)) where
   PairDelta da1 db1 <> PairDelta da2 db2 = PairDelta (da1 <> da2) (db1 <> db2)
@@ -170,6 +177,7 @@ instance Diff a => Diff (Identity a) where
   checkEmpty (IdentityDelta da) = checkEmpty da
 
   emptify = coerce (emptify :: Delta a -> Delta a)
+  emptyOf = coerce (emptyOf :: a -> Delta a)
 
 instance HasAtomicDelta a => HasAtomicDelta (Identity a) where
   newtype instance AtomicDelta (Identity a) = ADIdentity { runADIdentity :: AtomicDelta a }
@@ -215,6 +223,10 @@ instance Diff Double where
   checkEmpty (DDouble n) = n == 0
   {-# INLINE checkEmpty #-}
 
+
+
+class (Diff a, Typeable a) => DiffTypeable a
+instance (Diff a, Typeable a) => DiffTypeable a
 
 -- class (Applicative m, Alternative m, Foldable m) => MonoidF m
 

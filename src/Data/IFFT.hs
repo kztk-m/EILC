@@ -15,12 +15,12 @@ module Data.IFFT where
 import           Data.Typeable        (Proxy (..))
 
 import           Data.Code
-import           Data.Delta           (Delta, Diff, pairDelta)
+import           Data.Delta           (Delta, Diff, DiffTypeable, pairDelta)
 import           Data.Env             (AllIn, Env (..))
 import           Language.Unembedding (CategoryK (..), HasProduct (..),
                                        LetTerm (..), Term (..), Wit (Wit))
 
-import           Data.IFq             (DiffTypeable)
+import           Data.Code.Lifting    (DFunc)
 import           Data.Incrementalized (IncrementalizedQ (..))
 import           Data.Interaction     (Interaction (..))
 
@@ -30,17 +30,7 @@ import           Data.Interaction     (Interaction (..))
 data PackedDelta a where
   PackedDelta :: Diff a => Delta a -> PackedDelta a
 
-type family DFunc as r where
-  DFunc '[] r       = r
-  DFunc (a ': as) r = Delta a -> DFunc as r
 
-mkAbsD :: forall as r proxy. (AllIn as Diff) => Env proxy as -> (Env PackedCodeDelta as -> Code r) -> Code (DFunc as r)
-mkAbsD ENil f         = f ENil
-mkAbsD (ECons _ sh) f = [|| \a -> $$(mkAbsD sh (f Prelude.. ECons (PackedCodeDelta [|| a ||])) ) ||]
-
-mkAppD :: forall as r. Code (DFunc as r) -> Env PackedCodeDelta as -> Code r
-mkAppD f ENil                           = f
-mkAppD f (ECons (PackedCodeDelta a) as) = mkAppD [|| $$f $$a ||] as
 
 newtype InteractionT as b =
   InteractionT { runInteractionT :: DFunc as (b, InteractionT as b) }

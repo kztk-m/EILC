@@ -136,9 +136,6 @@ data IFq a b where
   IFq :: Conn WitTypeable cs -> (Code a -> CodeC (Code b, Conn PackedCode cs)) -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs)) -> IFq a b
 
 
-class (Diff a, Typeable a) => DiffTypeable a
-instance (Diff a, Typeable a) => DiffTypeable a
-
 convTEnv :: AllIn as DiffTypeable => Env proxy as -> Env WitTypeable as
 convTEnv ENil         = ENil
 convTEnv (ECons _ as) = ECons WitTypeable (convTEnv as)

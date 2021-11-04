@@ -640,6 +640,9 @@ when the range type is not a function. However, to do so `dfNN` must take a `Δa
 
     -- df is derivative and thus maps empty change to empty change
     nullify (_, df) = (df, df)
+
+The treatment would make sense as `dfNN` and `df0` can be obtained from a derivative `df : Γ × A -> ΔΓ × ΔA -> ΔB` of a function in a closure, with 
+`dfNN = df θ a dθ 0` and `df0 da = df (θ ⊕ dθ) a 0 da`; both must conincide when `dθ` is a nil change. 
     
 Then, the application of `dfNN` and `df0` can be defined via: `df a da = dfNN a (nullify da) ⊕ df0 a da`. Here, composition of `(dfNN, df0)` and `(dfNN', df0')` is defined as 
 
@@ -657,6 +660,113 @@ where the latter part is defined as
 
     dapp (f, a) (dfNN, df0, da) = dfNN a (nullify da) ⊕ df0 a da 
 
-- [ ] Check this works for our setting. 
+**Nov 4, 2021** The approach does not work well, because to apply a function update we need a nil change on `a`. 
 
+    (f ⊕ df) a = f a ⊕ df a 0 
+
+Let us revisit Giarrusso et al.'s idea more precisely, whether we can avoid the issue or not. The idea is to handle functions as a closure. 
+That is, a function of `a -> b` is represented as `e × (e × a -> b)` for some `e`. Accordingly, its delta type is give by: 
+
+    Δe × (e × a -> Δe × Δa -> Δb)
+
+that is, a pair of changes to the environment and a derivative of the closure function. We have:
+
+    f ⊕ df = (e, h) ⊕ (de, dh) = (e ⊕ de, h) 
+
+notice that `df` is a derivative. In the original calculus, we have: 
+
+    (f ⊕ df) (a ⊕ da) = f a ⊕ df a da 
+
+However, in this representation we are not able to compute `df a da` which requires `e`. 
+
+    (e ⊕ de, h) (a ⊕ da)
+    = h (e ⊕ de, a ⊕ da) 
+    = { dh is a derivative of h } 
+      h (e, a) ⊕ dh (e, a) de da 
+    = h (e, a) ⊕ dh (e, a) de 0 ⊕ dh (e ⊕ de, a) 0 da 
+
+Notice that `dh` is a derivative of `h`: there is no problem of composition. 
+
+It is easy to define the semantics to abstraction: 
+
+    (h :: Γ × A -> B) × (dh :: Γ × A -> ΔΓ x ΔA -> ΔB) 
+    ---------------------------------------------------
+    (l :: Γ -> Γ × (Γ × A -> B)) ×
+     (dl :: Γ -> ΔΓ -> ΔΓ × (Γ × A × ΔΓ × ΔA -> ΔB))
+
+
+    abs h dh = (\θ -> (θ，h), \_ dθ -> (dθ, dh))
+
+Function definition is defined via: 
+
+    (A × ΔA) × (Γ × (Γ × A -> B)) × (ΔΓ × (Γ × A -> ΔΓ x ΔA -> ΔB))
+    -> (B × ΔB)
+
+    app (a, da, θ, h, dθ, dh) = h (θ, a) ⊕ dh (θ , a) (dθ, da) 
+
+An issue is exposure of `e`, preventing the system from being compositional. 
+
+------
+
+Even in this approach, we need to compute `0 :: Δa` to perform `dh (θ, a) (dθ, 0)` to implement the `mapAPI`. kztk: The CTS approach computes `0 :: Δa` from `a`, instead of `da`. 
+
+     [A, B] = (A -> B, A -> ΔA -> ΔB)
+    Δ[A, B] = A -> ΔB 
+
+    abs :: 
+      (Γ × A -> B) × (Γ × A -> ΔΓ x ΔA -> ΔB) 
+      -> (Γ -> (A -> B, A -> ΔA -> ΔB)) × (Γ -> ΔΓ -> A -> ΔB)
+    abs h dh = (\θ -> (\a -> h (θ, a), \a da -> dh (θ , a) (nil θ, da)), 
+                \θ dθ -> \a -> dh (θ , a) (dθ, nil a))
+
+In our case: 
+
+      [A, B] = (A -> (B × A0 × C)) × (ΔA -> A0 × C -> (ΔB × A0 × C))
+     Δ[A, B] = A0 × C -> (ΔB × A0 × C) 
+
+     abs ::
+       (Γ × A -> (B × C)) × (ΔΓ × ΔA -> C -> (ΔB × C))
+       -> (Γ -> (A -> (B × A0 × C)) × (ΔA -> A0 × C -> (ΔB × A0 × C)))
+          × (ΔΓ -> (A0 × C -> ΔB × A0 × C))
+     abs (h, trh) = 
+       (\θ -> (\a -> let (b, c) = h (θ , a) in (b, (nilOf a, c))), 
+               \da (a0, c) -> let (db, c') = trh (nil θ, da) c in (db, (a0, c')), 
+        \dθ -> \(a0, c) -> let (db, c') = trh (dθ, a0) c in (c', a0))
+        
+     (f, df) ⊕ dfNN = (\a -> let (b, c) = f a in (db, c') = dfNN (nilOf a, c) in (b ⊕ db, c'), df) 
+
+    appOp :: 
+      (A × [A, B] -> B × C') × 
+      (ΔA × Δ[A, B] -> C' -> ΔB × C')
+      where C' = A0 × C × (ΔA -> A0 × C -> (ΔB × A0 × C))
+    appOp = (\a (f, df) -> 
+                   let (b, dd) = f a 
+                   in (b, dd, df), 
+             \da dfNN (dd, df) -> 
+                   let (db1, dd')  = dfNN d 
+                       (db2, dd'') = df da dd'
+                   in (db1 <> db2, dd''))      
+
+    -- Application can be defined accordingly, by passing the derivative part as a part of `C`.
+
+**An Issue** There are two calls of `trh`, where both will be used in application. It may be difficult for us to avoid the issue in general, but this is only important when we want to separate delta into compositions of smaller updates. Maybe, we should expose Γ and C.
+
+----
+     [A, B] = (e, e -> A -> B)
+    Δ[A, B] = (Δe, e -> Δe -> A -> ΔA -> ΔB)
+
+    abs :: Term (Γ × A) B -> ∃e. Term Γ (Fun e A B)
+    app :: ∀e. Term Γ (Fun e A B) -> Term Γ A -> Term Γ B 
+
+---
+
+     [A, B] = A -> B
+    Δ[A, B] = A -> ΔA -> ΔB
+
+    abs h dh = (\θ a -> h (θ, a), 
+                \θ dθ a da -> dh (θ, a) (dθ, da))
+    appOp (a, da, f, df) = f a ⊕ df a da 
+
+    app e1 e2 = (\θ -> fst e1 θ (fst e2 θ), 
+                 \θ dθ -> appOp (fst e2 θ , snd e2 θ dθ, fst e1 θ, snd e2 θ dθ))
 

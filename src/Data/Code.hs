@@ -44,6 +44,9 @@ newtype PackedCode a = PackedCode { getCode :: Code a }
 data PackedCodeDelta a where
   PackedCodeDelta :: Diff a => Code (Delta a) -> PackedCodeDelta a
 
+data PackedCodeDiff a where
+  PackedCodeDiff :: Diff a => Code a -> PackedCodeDiff a
+
 mkLetEnv :: Env PackedCode aa -> CodeC (Env PackedCode aa)
 mkLetEnv = mapEnvA (\(PackedCode c) -> PackedCode <$> mkLet c)
 
