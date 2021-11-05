@@ -107,13 +107,66 @@ that the use of $\var{diff}$ in the conversion below always succeeds.
 \begin{code}
 \=L \key{instance}~\con{STLC} \A \con{U}~ \WHERE \\
 \=L \quad {} 
- \=I \var{lam} \A f = \con{U} \DOLLAR \lambda \gamma \to {} \\
+ \=I \var{lam} \A f = \con{U} \DOLLAR \lambda \gamma \to \con{Lam} \DOLLAR  \\
  \=I \qquad {} 
       \=l \LET~\gamma_a = \con{ECons} \A \con{Proxy} \A \gamma \\
-      \=l \IN~ \con{Lam} \DOLLAR \var{unU} \A (f \A (\con{U} \DOLLAR \lambda \gamma' \to \con{Var} \A (\var{diff} \A \gamma_a \A \gamma' \A \con{Z}))) \A \gamma_a\\
+      \=l \IN~ \var{unU} \A (f \A (\con{U} \DOLLAR \lambda \gamma' \to \con{Var} \A (\var{diff} \A \gamma_a \A \gamma' \A \con{Z}))) \A \gamma_a\\
  \=I \var{app} = \dots \COMMENT{straightforward} \dots 
 \end{code}
 
+An advantage of the unembedding is that it enables us to advantage of both representations of syntax. Generally speaking, higher-order abstract syntax is easy to write because we do not care about shifting as in de Bruin indexed terms. On the other hand, HOAS is sometimes not suitable for program manipulation due to handling of functions such as $e \A a \to e \A b$ in $\var{lam}$. Especially in the tagless-final style, it is difficult to write a transformation that inspects transformation results, because the tagless-final style can be viewed as a build form of a term algebra. 
+
+Another advantage of the unembedding is that we can implement the semantics in which $\sem{ \Gamma \vdash e : A }$ is not a function from $\sem{\Gamma}$ to $\sem{A}$ rather straightforwardly. An example of such semantics is backward evaluation~\cite{MatsudaW18haskell}, where $\sem{ \Gamma \vdash e : A } \in \sem{A} \to \sem{\Gamma}$, especially when we consider second-order language constructs, \ie, constructs that introduce variables such as $\CASE$ expressions, and (first-order) function abstractions.\footnote{Otherwise, we can just use Yoneda embedding to implement the semantics: 
+$\sem{A} \to \sem{\Gamma}$ is isomorphic to $\forall s. (\sem{\Gamma} \to s) \to (\sem{A} \to s)$. The approach does not scale easily to second-order constructs, though. }
+
+\subsection{Incrementalized $\lambda$ Calculus}
+
+\citet{CaiGRO14}'s incrementalized $\lambda$ calculus (ILC, for short) interprets $\lambda$ calculus so that it translates updates to avoid 
+recomputation of results. An interesting point of the calculus is treatment of functions so that a system can have higher-order APIs such as $\var{map}$ and $\var{fold}$-like operations. 
+
+More concretely, in ILC, a function $f$ of type $A \to B$ comes with its derivative 
+$\partial f : A \to \Delta A \to \Delta B$, where $\Delta A$/$\Delta B$ denotes changes on $A$/$B$, satisfying: 
+\[
+ f \A (a \oplus \var{da}) = f \A a \oplus \partial f \A a \A \var{da} 
+\]
+Here, we write by $a \oplus \var{da}$ the result of applying update $\var{da} : \Delta A$ to a value $a : A$. 
+In the calculus, a function of type $A \to B$ is also updatable by a function update $\Delta (A \to B)$, where 
+\[
+  \Delta(A \to B) = A \to \Delta A \to \Delta B\text{.}
+\]
+A function $f$ and its update $\var{df}$ must satisfy the law: 
+\[
+  (f \oplus \var{df}) \A (a \oplus \var{da}) = f \A a \oplus \var{df} \A a \A \var{da} 
+\]
+Especially, when $\var{da} = 0$, a unit of $\oplus$ called nil update, we have 
+\(
+(f \oplus \var{df}) \A a  = f \A a \oplus \var{df} \A a \A 0\text{.}
+\) 
+In general, $\var{df} \A a \A 0$ may not be a nil change, intuitively because a function update involves 
+both a change on free variables in $f$ and a derivative after the reflection of the update to free variable. 
+If the former information is an nil update, meaning that it does not change the function itself, a function 
+update defines a derivative of $f$, which is obtained from the above equation by with $(f \oplus \var{df}) = f$. 
+Notice that this also means that a nil update on $A$ may not be unique or may not be obtained out of the thin air. 
+
+The original semantics involves one that interprets a term as a derivative for a standard interpretation, \ie, 
+$\sem{ \Gamma \vdash e : A } \in \sem{\Gamma} \to \Delta \sem{\Gamma} \to \Delta \sem{A}$. One might think that this 
+would satisfy the criteria for which interpretation via unembedding will be useful. Some, however, would also notice
+that we can tuple~\cite{HuITT97,Chin93} the semantics with the standard interpretation to obtain a tupled semantics; 
+$\sem{ \Gamma \vdash e : A }^\mathrm{t} \in (\sem{\Gamma} \x \Delta \sem{\Gamma}) \to (A \x \Delta \sem{A})$. 
+Notice that 
+\[
+ (A \to B) \times \Delta (A \to B) 
+ =  (A \to B) \times (A \to \Delta A \to \Delta B) 
+ \subseteq (A \x \Delta A) \to (B \x \Delta B)
+\]
+so there is no problem on the treatment of function values. 
+
+The tupled semantics, however, is almost useless, because tupled computation involves the original semantics. 
+No time is saved by the incrementalized computation. This is unavoidable as their derivatives require the original argument as $A \to \Delta A \to \Delta B$. This also contradicts our expectation of how incrementalized version is used: an incrementalized version of $f : A \to B$, after a first run, 
+should be able to transform $\Delta A$ to $\Delta B$, repeatedly. 
+
+Another issue of the original ILC is that they cannot support separation of updates. It is rather common that updates $\var{da} : \Delta A$
+is represented by compositions of atomic updates $\var{da} = \var{da}_1 \oplus \dots \oplus \var{da}_n$, where we abuse $\oplus$ also for composition in addition to application. \todo{Say more}
 
 
 \bibliographystyle{plainnat}
