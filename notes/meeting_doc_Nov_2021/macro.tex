@@ -1,0 +1,464 @@
+% -*- mode:LaTeX -*-
+\makeatletter
+\usepackage{latexsym}
+\usepackage{xparse}
+\usepackage{xifthen}
+
+\def\qedmath{%
+   \relax\ifmmode
+      \@badmath
+   \else
+      \begin{trivlist}%
+      \@beginparpenalty\predisplaypenalty
+      \@endparpenalty\postdisplaypenalty
+      \item[]\leavevmode
+      \hbox to\linewidth\bgroup\relax\hfil$\displaystyle
+      \bgroup
+   \fi
+}
+\def\endqedmath{%
+   \relax\ifmmode
+      \egroup $\hfil \egroup\\[-\baselineskip]
+      \hbox{}\hfill\llap{\phantom{0}\qed}
+      \end{trivlist}
+   \else
+      \@badmath
+   \fi
+}
+\def\qedflmath{\relax \ifmmode \@badmath
+  \else\begin{trivlist}%
+     \@beginparpenalty\predisplaypenalty
+     \@endparpenalty\postdisplaypenalty
+    \item[]\leavevmode \hb@xt@\linewidth\bgroup $\m@th\displaystyle %$
+    \hskip\mathindent\bgroup
+  \fi}
+\def\endqedflmath{\relax\ifmmode
+    \egroup $% $
+    \egroup \\[-\baselineskip]\hskip\linewidth\llap{\qed}
+    \end{trivlist}%
+  \else \@badmath
+  \fi}
+\makeatother
+
+\usepackage{color}
+\newcommand{\witharity}[2]{#1^{(#2)}}
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+%\newcommand{\todo}[1]{}
+\newcommand{\kztk}[1]{\textcolor{blue}{[kztk: #1]}}
+\newcommand{\meng}[1]{\textcolor{green}{[Meng: #1]}}
+\definecolor{gold}{RGB}{218,165,32}
+\newcommand{\sam}[1]{\textcolor{gold}{[Sam: #1]}}
+
+\newcommand{\mi}[1]{\ensuremath{\mathit{#1}}}
+\newcommand{\mr}[1]{\ensuremath{\mathrm{#1}}}
+\newcommand{\ms}[1]{\ensuremath{\mathsf{#1}}}
+\newcommand{\mt}[1]{\ensuremath{\mathtt{#1}}}
+\newcommand{\mc}[1]{\ensuremath{\mathcal{#1}}}
+
+\newcommand{\foreignWord}[1]{#1}
+\newcommand{\eg}{\foreignWord{e.g.}\xspace}
+\newcommand{\ie}{\foreignWord{i.e.}\xspace}
+\newcommand{\cf}{\foreignWord{cf.}\xspace}
+\newcommand{\etal}{\foreignWord{et al.}\xspace}
+\newcommand{\wrt}{{w.r.t.}\xspace}
+
+\newcommand{\Case}[1]{\textbf{Case}: #1.}
+\newcommand{\CaseP}[1]{\paragraph{\normalfont\textbf{Case}: #1.}}
+
+\newcommand{\Gl}{\lambda}
+\newcommand{\Ga}{\alpha}
+\newcommand{\Gb}{\beta}
+\newcommand{\Gk}{\kappa}
+\newcommand{\Gr}{\rho}
+\newcommand{\Gs}{\sigma}
+\newcommand{\GS}{\Sigma}
+\newcommand{\Gt}{\tau}
+\newcommand{\Gth}{\theta}
+\newcommand{\GTH}{\Theta}
+\newcommand{\GTh}{\Theta}
+\newcommand{\Gg}{\gamma}
+\newcommand{\GG}{\Gamma}
+\newcommand{\Gd}{\delta}
+\newcommand{\GD}{\Delta}
+
+\newcommand{\x}{\times}
+\newcommand{\ox}{\otimes}
+
+\newenvironment{tarray}[2][c]{%
+\settowidth{\dimen1}{${} = {}$}%
+\setlength{\arraycolsep}{0.125\dimen1}
+\hspace{-0.125\dimen1}\array[#1]{#2}\relax
+}
+{%
+\endarray\hspace{-0.125\dimen1}
+}
+\newcommand{\bb}{\tarray{lllll}}
+\newcommand{\bbc}{\tarray{c}}
+\newcommand{\bbt}{\tarray[t]{lllll}}
+\newcommand{\bbb}{\tarray[b]{lllll}}
+\newcommand{\ee}{\endtarray}
+
+\newcommand{\lto}{\multimap}
+\newcommand{\ulto}{\stackrel{\omega}{\smash{\multimap}\rule{0pt}{0.7ex}}}
+
+\newcommand{\pto}[1]{\to_{#1}}
+
+\newcommand{\plto}[1]{\stackrel{#1}{\smash{\multimap}\rule{0pt}{0.7ex}}}
+
+\newcommand{\from}{\leftarrow}
+\newcommand{\To}[0]{\Rightarrow}
+\newcommand{\From}{\Leftarrow}
+
+\newcommand{\InL}{\con{InL}}
+\newcommand{\InR}{\con{InR}}
+
+\newcommand{\bij}[2]{{#1} \leftrightarrow {#2}}
+
+\newcommand{\bba}{\alignedat{8}}
+\newcommand{\bbat}{\alignedat[t]{8}}
+\newcommand{\eea}{\endalignedat}
+
+\newcommand{\APPEND}{\mathbin{+\!+}}
+
+\newcommand{\DOLLAR}{\ensuremath{\mathbin{\texttt{\$}}}}
+\newcommand{\key}[1]{\ensuremath{\mathbf{#1}}} % keyword
+\newcommand{\api}[1]{\ensuremath{\mathsf{#1}}} % api
+
+\newcommand{\DATA}{\key{data}}
+\newcommand{\TYPE}{\key{type}}
+\newcommand{\NEWYTPE}{\key{newtype}}
+\newcommand{\WHERE}{\key{where}}
+\newcommand{\INSTANCE}{\key{instance}}
+\newcommand{\CLASS}{\key{class}}
+\newcommand{\CASE}{\key{case}}
+\newcommand{\CASEEX}[3]{\CASE~#1~\OF #2 \bbt #3 \ee}
+\newcommand{\FIX}{\key{fix}}
+
+\newcommand{\WITH}{\mathrel{\key{with}}}
+
+\newcommand{\A}{\;}
+
+\newcommand{\LIFT}{\key{lift}}
+\newcommand{\UNLIFT}{\key{unlift}}
+\newcommand{\PIN}{\key{pin}}
+
+\newcommand{\FLIFT}{\api{lift}}
+\newcommand{\FUNLIFT}{\api{unlift}}
+\newcommand{\FPIN}{\api{pin}}
+
+\newcommand{\FWD}{\key{fwd}}
+\newcommand{\BWD}{\key{bwd}}
+\newcommand{\LIFTC}{\key{lift}_2}
+
+\newcommand{\FAPP}[2]{#1 \triangleright #2}
+\newcommand{\BAPP}[2]{#1 \triangleleft  #2}
+
+\newcommand{\Either}[2]{\con{Either} \A{#1}\A{#2}}
+\newcommand{\PInj}[2]{{#1 \rightleftharpoons #2}}
+%\newcommand{\PInj}[2]{\con{PInj} \A {#1} \A {#2}}
+
+\newcommand{\PClo}[2]{\langle #1. #2 \rangle}
+
+\newcommand{\DEF}{\key{def}}
+\newcommand{\SIG}{\key{sig}}
+
+\newcommand{\NIL}{{[\,]}}
+
+\newcommand{\RECONCILED}{\key{reconciled}}
+\newcommand{\BY}{\key{by}}
+\newcommand{\OF}{\key{of}}
+\newcommand{\DO}{\key{do}}
+\newcommand{\LET}{\key{let}}
+\newcommand{\IN}{\key{in}}
+
+\newcommand{\IF}{\key{if}}
+\newcommand{\THEN}{\key{then}}
+\newcommand{\ELSE}{\key{else}}
+\newcommand{\shortequals}{%
+{\rlap{\rule[0.14em]{.25em}{0.5pt}}{\rule[0.34em]{.25em}{0.5pt}}}
+}
+
+\newcommand{\doubleequals}{\ensuremath{\mathrel{%
+  \shortequals\,\shortequals}}}
+\newcommand{\ndoubleequals}{%
+  \ensuremath{\not\expandafter\doubleequals}}
+
+\newcommand{\LCOMMENT}[1]{\texttt{-{}-}~\text{#1}}
+\newcommand{\COMMENT}[1]{\texttt{\{-}~\text{#1}~\texttt{-\}}}
+
+\usepackage{stmaryrd}
+
+\newcommand{\TUnit}{\con{Unit}}
+\newcommand{\EEnv}{{\varepsilon}}
+
+\makeatletter
+\newcounter{pe@nocounter}
+\newcommand{\peano}[1]{%
+\setcounter{pe@nocounter}{#1}
+\pe@no}
+\newcommand{\pe@no}{%
+\ifnum\value{pe@nocounter}>1
+\addtocounter{pe@nocounter}{-1}%
+\con{S} \A (\expandafter\pe@no)%
+\else%
+  \ifnum\value{pe@nocounter}>0%
+  \con{S} \A \con{Z}%
+  \else%
+  \con{Z}%
+  \fi%
+\fi%
+}
+
+\newcommand{\set}{\@ifstar\mysetStar\mysetNoStar}
+\newcommand{\mysetStar}[1]{\{#1\}}
+\newcommand{\mysetNoStar}[1]{\left\{#1\right\}}
+\newcommand{\sem}{\@ifstar\mySemStar\mySemNoStar}
+\newcommand{\mySemStar}[1]{{\llbracket #1 \rrbracket}}
+\newcommand{\mySemNoStar}[1]{{\left\llbracket #1 \right\rrbracket}}
+\makeatother
+\newcommand{\reason}[1]{\{\,\text{#1}\,\}}
+
+\newcommand{\dom}{\mathsf{dom}}
+\newcommand{\ran}{\mathsf{ran}}
+\newcommand{\fv}{\mathsf{fv}}
+
+\newcommand{\bottom}{{\perp}}
+
+\newcommand{\bs}{\char`\\} %}\textbackslash}
+\newcommand{\lb}{\char'173}
+\newcommand{\rb}{\char'175}
+\newcommand{\us}{\textunderscore}%{\char`_}
+\newcommand{\nl}{\bs{}n}
+
+\newcommand{\rname}[1]{\text{\textsc{#1}}}
+\newcommand{\ninfer}[3]{\infer[\!\!\rname{#1}]{#2}{#3}}
+
+\newcommand{\con}[1]{\ms{#1}}
+\newcommand{\var}[1]{\mi{#1}}
+
+\newcommand{\DEq}{\vcentcolon\vcentcolon=}
+%\newcommand{\defeq}{\stackrel{\mathrm{def}}{=}}
+\newcommand{\defeq}{\triangleq}
+
+\newcommand{\str}[1]{\texttt{"#1"}}
+\newcommand{\chr}[1]{\texttt{'#1'}}
+
+\newcommand{\V}[1]{\overline{#1}}
+\newcommand{\Size}[1]{\lvert{#1}\rvert}
+
+\newcommand{\PROMPT}{\texttt{>}}
+
+\newcommand{\mynewpar}[1]{\parskip=0pt\parindent=0pt\par\vskip #1\noindent}
+
+\newcommand{\mycodestart}{\(}
+\newcommand{\mycodeend}{\)}
+\newcommand{\mycolumn}[1]{\column{#1}{@{}>{\mycodestart}l<{\mycodeend}@{}}}
+\newcommand{\myrcolumn}[1]{\column{#1}{@{}>{\mycodestart}r<{\mycodeend}@{}}}
+\newcommand{\myprompt}[2][]{\column{#2}{@{\ifthenelse{\equal{#1}{}}{\PROMPT}{#1}~{}}>{\mycodestart~}l<{\mycodeend}@{}}}
+
+\newcommand{\declarecolumns}{%
+\mycolumn{a}\mycolumn{b}\mycolumn{c}\mycolumn{d}\mycolumn{e}%
+\mycolumn{f}\mycolumn{g}\mycolumn{h}\mycolumn{i}\mycolumn{j}%
+\mycolumn{k}\mycolumn{l}\mycolumn{m}\mycolumn{n}\mycolumn{o}%
+\mycolumn{p}\mycolumn{q}\mycolumn{r}\mycolumn{s}\mycolumn{t}%
+\mycolumn{u}\mycolumn{v}\mycolumn{w}\mycolumn{x}\mycolumn{y}%
+\mycolumn{z}%
+\mycolumn{A}\mycolumn{B}\mycolumn{C}\mycolumn{D}\mycolumn{E}%
+\mycolumn{F}\mycolumn{G}\mycolumn{H}\mycolumn{I}\mycolumn{J}%
+\mycolumn{K}\mycolumn{L}\mycolumn{M}\mycolumn{N}\mycolumn{O}%
+\mycolumn{P}\mycolumn{Q}\mycolumn{R}\mycolumn{S}\mycolumn{T}%
+\mycolumn{U}\mycolumn{V}\mycolumn{W}\mycolumn{X}\mycolumn{Y}%
+\mycolumn{Z}%
+\mycolumn{L1}\mycolumn{L2}\mycolumn{L3}\mycolumn{L4}\mycolumn{L5}\mycolumn{L6}%
+\mycolumn{W1}\mycolumn{W2}\mycolumn{W3}\mycolumn{W4}\mycolumn{W5}%
+\mycolumn{R1}\mycolumn{R2}\mycolumn{R3}\mycolumn{R4}\mycolumn{R5}%
+\myprompt{CL}%
+}
+
+
+
+
+\newenvironment{code}{%
+\mynewpar\abovedisplayskip%
+\advance\leftskip\mathindent%
+\def\ldef{\=L\DEF~{}\={definetab}}%
+\def\lsig{\=L\SIG~{}\={definetab}}%
+\def\lbar{\={definetab}\hfill|}%
+\pboxed%
+% Declare well-used column names 
+\declarecolumns%
+\mycolumn{definetab}%
+}%
+{%
+\endpboxed%
+\mynewpar\belowdisplayskip%
+\ignorespacesafterend%
+}%
+
+\newenvironment{mcode}{%
+\mynewpar\abovedisplayskip%
+\advance\leftskip\mathindent%
+\ptboxed%
+% Declare well-used column names 
+\declarecolumns%
+}%
+{%
+\endptboxed%
+\mynewpar\belowdisplayskip%
+\ignorespacesafterend%
+}%
+
+
+\newcommand{\hsvar}[1]{\texttt{#1}}
+\newcommand{\hscon}[1]{\texttt{#1}}
+
+\newenvironment{myhscode}{%
+\mynewpar\abovedisplayskip%
+\advance\leftskip\mathindent%
+\let\con=\hscon%
+\let\mi=\hsvar%
+\def\mycodestart{\(\tt\bgroup}%
+\def\mycodeend{\egroup\)}%
+\def\ell{l}%
+\def\dontcare{\texttt{\us}}%
+\def\key##1{\texttt{\textbf{##1}}}%
+%\def\lambda{\text{\tt \textlambda}}
+\ttfamily%
+\pboxed%
+% Declare well-used column names 
+\declarecolumns%
+}%
+{%
+\endpboxed%
+\mynewpar\belowdisplayskip%
+\ignorespacesafterend%
+}%
+
+\makeatletter
+\NewDocumentEnvironment{minicode}{O{t}m}{\minipage[#1]{#2}\code}{\endcode\endminipage}
+%% \newenvironment{codeblocks}{%
+%%       \setlength{\parskip}{0pt}%
+%%       \setlength{\parindent}{0pt}%
+%%       \setlength{\mathindent}{0pt}%
+%%       \setlength{\abovedisplayskip}{0pt}%
+%%       \setlength{\belowdisplayskip}{0pt}%
+%%       \begin{trivlist}%
+%%       \@beginparpenalty\predisplaypenalty%
+%%       \@endparpenalty\postdisplaypenalty%
+%%       \item[]\leavevmode%
+%%       \hbox to\linewidth\bgroup\relax\hfil%
+%% }{%
+%%       \hfil\egroup\end{trivlist}%     
+%%       %\hfil\egroup%
+%%       %\mynewpar{0pt}%
+%% }
+\newenvironment{codeblocks}{%
+  \bgroup%
+  \mynewpar{\abovedisplayskip}%
+  \bgroup%
+  \setlength{\abovedisplayskip}{0pt}%
+  \setlength{\belowdisplayskip}{0pt}%
+  \bgroup\hspace{\mathindent}\setlength{\mathindent}{0pt}%
+}{%
+  \hfil\egroup\egroup\mynewpar{\belowdisplayskip}%
+  \egroup%
+  \ignorespacesafterend%
+}
+\makeatother
+
+\newcommand{\dontcare}{%
+\settowidth{\dimen2}{v}%
+\hspace{0.05\dimen2}\rule{0.9\dimen2}{0.5pt}\hspace{0.05\dimen2}}
+
+
+%\NewDocumentCommand\REV{m}{%
+%\key{rev}\ifthenelse{\equal{#1}{}}{}{\A #1}}
+
+%\NewDocumentCommand\REV{m}{\ifthenelse{\equal{#1}{}}{{-}^\mathrm{r}}{#1^\mathrm{r}}}
+%% \NewDocumentCommand\REV{m}{\ifthenelse{\equal{#1}{}}{\mathbf{R}}{\mathbf{R} \, #1}}
+
+\definecolor{col-rev}{rgb}{0.55,0.05,0.08}
+%\definecolor{col-rev}{rgb}{0.05,0.15,0.76}
+\NewDocumentCommand\revdecorate{m}{{\color{col-rev}#1}}
+\NewDocumentCommand\revmark{m}{{#1}^{\bullet}}
+\NewDocumentCommand\REV{m}{\ifthenelse{\equal{#1}{}}{\revmark{\revdecorate{(-)}}}{\revmark{\revdecorate{#1}}}}
+\newcommand\REVP[1]{\REV{(#1)}}
+\newcommand\REVTup[1]{\revmark{\mathopen{\revdecorate{(}}#1\mathclose{\revdecorate{)}}}}
+
+\newcommand{\REVDO}{\key{do}_\mathrm{i}}
+\newcommand{\BEFORE}{\key{in}}
+
+
+\newcommand{\PTy}[4]{{#3 : #4 \triangleright #1; #2}}
+\newcommand{\PTyM}[4]{#3 : #4 \triangleright_{#2} #1}
+
+\newcommand{\KType}{{*}}
+\newcommand{\UN}{\con{Un}}
+\newcommand{\FUN}{\con{Fun}}
+
+\newcommand{\TargetUnit}{()}
+\newcommand{\TargetBool}{\con{Bool}}
+\newcommand{\ObjectBool}{\mathbb{B}}
+\newcommand{\R}[2]{#1 \rightleftharpoons #2}
+% \newcommand{\Perm}[2]{#1 \stackrel{\mathrm{p}}{\leftrightarrow} #2}
+\newcommand{\Perm}[2]{#1 \leftrightarrow_\mr{p} #2}
+
+\newcommand{\tcon}[1]{\underline{\con{#1}}}
+
+\newcommand{\Subst}[2]{#2/#1}
+
+\newcommand{\Bang}[1]{{!#1}}
+\newcommand{\BangP}[1]{\Bang{(#1)}} % bang with parens. 
+
+\newcommand{\maxop}{\mathbin{\uparrow}}
+
+\newcommand{\semDsplit}[1]{\var{split}_{#1}}
+\newcommand{\semTHsplit}[1]{\var{perm}_{#1}}
+\newcommand{\INV}[1]{#1^{-1}}
+\newcommand{\fcomp}{\fatsemi}
+\newcommand{\disj}[2]{\key{disj} \A \{#1,#2\}}
+\newcommand{\disjs}[1]{\key{disj} \A \{#1\}}
+
+\newcommand{\rawevalU}{\Downarrow}
+\newcommand{\reduceU}{\longrightarrow}
+\newcommand{\rawevalB}{\Leftarrow}
+\newcommand{\rawevalF}{\Rightarrow}
+
+%\newcommand{\rawevalcolor}{\color{red}} % to detect raw occurrence of \evalU, \evalF, and \evalB
+\newcommand{\rawevalcolor}{} % to detect raw occurrence of \evalU, \evalF, and \evalB
+\newcommand{\evalU}{\mathrel{\rawevalcolor\rawevalU}}
+\newcommand{\evalF}{\mathrel{\rawevalcolor\rawevalF}}
+\newcommand{\evalB}{\mathrel{\rawevalcolor\rawevalB}}
+
+\newcommand{\EvalRelU}[2]{#1 \rawevalU #2}
+\newcommand{\EvalRelF}[3]{#1 \vdash #2 \rawevalF #3}
+\newcommand{\EvalRelB}[3]{#2 \rawevalB #3 \dashv #1}
+
+\newcommand{\EvalRelUS}[3]{#1 \rawevalU^{#3} #2}
+\newcommand{\EvalRelFS}[4]{#1 \vdash #2 \rawevalF^{#4} #3}
+\newcommand{\EvalRelBS}[4]{#2 \rawevalB^{#4} #3 \dashv #1}
+
+
+\newcommand{\TransTo}[8]{#1 \leadsto_{#2,#3,#4,#5}^{#6} #7 \vdash #8}
+\newcommand{\cinj}[1]{\mi{in}_{\con{#1}}}
+
+
+\newcommand{\norev}{\key{norev}}
+
+\newcommand{\PredE}[2]{\mathcal{E}\sem{#1}_{#2}}
+\newcommand{\PredV}[2]{\mathcal{V}\sem{#1}_{#2}}
+
+\newcommand{\RE}[3]{\mathcal{E}_{#2}\sem{#1}_{#3}}
+\newcommand{\RV}[3]{\mathcal{V}_{#2}\sem{#1}_{#3}}
+\newcommand{\RR}[3]{\mathcal{R}_{#2}\sem{#1}_{#3}}
+
+\newcommand{\LE}[3]{\mathcal{E}^\mathrm{lift}_{#2}\sem{#1}_{#3}}
+\newcommand{\LV}[3]{\mathcal{V}^\mathrm{lift}_{#2}\sem{#1}_{#3}}
+\newcommand{\LR}[3]{\mathcal{R}^\mathrm{lift}_{#2}\sem{#1}_{#3}}
+
+%% \newcommand{\LE}[2]{\mathcal{LE}_{#2}\sem{#1}}
+%% \newcommand{\LV}[2]{\mathcal{LV}_{#2}\sem{#1}}
+
+\newcommand{\VM}[3]{\mathcal{V}_{#3}\sem{#1}_{#2}}
+\newcommand{\EM}[3]{\mathcal{E}_{#3}\sem{#1}_{#2}}
+\newcommand{\IM}[2]{\mathcal{I}\sem{#1}_{#2}}

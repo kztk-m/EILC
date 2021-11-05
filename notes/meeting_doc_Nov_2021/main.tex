@@ -1,0 +1,122 @@
+\documentclass{article}
+
+\usepackage{fullpage}
+
+\usepackage{xspace}
+\usepackage{mathtools}
+\usepackage{proof}
+\usepackage{polytable}
+\usepackage{alltt}
+\usepackage{calc}
+
+\usepackage[round,sort]{natbib}
+\let\cite=\citep
+
+\input{macro}
+
+\usepackage{amsthm} 
+\theoremstyle{definition}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem*{theorem*}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{assumption}[theorem]{Assumption}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+
+\NewDocumentCommand{\figbox}{m}{%
+\setlength{\fboxsep}{2pt}%
+\fbox{\parbox{\textwidth-2\fboxsep-2pt}{%
+\setlength{\mathindent}{0pt}%
+\setlength{\abovedisplayskip}{0pt}%
+\setlength{\belowdisplayskip}{0pt}%
+#1}}}
+
+\makeatletter
+%mathindent has to be defined
+\@ifundefined{mathindent}%
+  {\newdimen\mathindent\mathindent\leftmargini}%
+  {}%
+\makeatother
+\setlength\mathindent{1.8em plus 0em minus 0.2em}%{1.5em plus 0em minus 0.5em}
+\newlength{\blanklineskip}
+\setlength{\blanklineskip}{0.66084ex}
+
+
+\title{Unembedded Incremetalized Calculus: Compositional Approach to Cache-Transfer Style}
+\author{Kazutaka Matsuda}
+
+
+\begin{document}
+
+\maketitle 
+
+
+\section{Motivation}
+
+\begin{itemize}
+ \item \citet{CaiGRO14} is concise and elegant but has some practical limitation. 
+ \item \citet{GiarrussoRS19} addresses the issue but this is a whole program transformation and 
+   no discussions on type preservation. 
+ \item We address the issues by designing an unembedded~\cite{AtLY09,Atkey09} DSL. 
+\end{itemize} 
+
+\section{Preliminaries}
+
+\subsection{Unembedding}
+
+Unembedding~\cite{AtLY09,Atkey09} is a transformation that converts tagless-final~\cite{CaKS09} style DSL into de Bruijn indexed style.\footnote{The same technique can be applied to PHOAS~\cite{Chlipala08}.}
+
+Consider the following syntax for pure simply-typed $\lambda$-calculus in the tagless final style. 
+\begin{code}
+\=L \key{class}~\var{STLC} \A (e :: \con{Type} \to \con{Type}) ~\key{where}\\
+\=L \quad {}
+   \=M \var{lam} \=T :: (e \A a \to e \A b) \to e \A (a \to b) \\
+   \=M \var{app} \=T :: e \A (a \to b) \to e \A a \to e \A b 
+\end{code}
+(For simplicity, we do not distinguish the types in Haskell (of kind $\con{Type}$) and the types in the target language.) 
+The unembedding converts the above syntax into the following de Bruijn indexed first-order AST. 
+\begin{code}
+\=L \DATA~\con{In} \A (a :: \con{Type}) \A (\var{env} :: [\con{Type}])~\WHERE\\
+\=L \quad {} 
+  \=I \con{Z} \=t :: \con{In} \A a \A (a : \var{env}) \\
+  \=I \con{S} \=t :: \con{In} \A a \A \var{env} \to \con{In} \A a \A (b : \var{env}) \\[\blanklineskip]
+\=L \DATA~\con{D} \A (\var{env} :: [\con{Type}]) \A (a :: \con{Type}) \WHERE\\
+  \=I \con{Var} \=T :: \con{In} \A a \A \var{env} \to \con{D} \A \var{env} \A a \\
+  \=I \con{Lam} \=T :: \con{D} \A (a : \var{env}) \A b \to \con{D} \A \var{env} \A (a \to b) \\
+  \=I \con{App} \=T :: \con{D} \A \var{env} \A (a \to b) \to \con{D} \A \var{env} \A a \to \con{D} \A \var{env} \A b 
+\end{code}
+The difficulty of this conversion is what argument we pass for $f$ of $\var{lam} \A f$. Basically, it must be $\con{Var} \A n$, 
+but we cannot determine $n$ at this place: for example, 
+for $\var{lam} \DOLLAR \lambda x \to x$, the $n$ must be $\con{Z}$, 
+while, for $\var{lam} \DOLLAR \lambda x \to \var{lam} \DOLLAR \lambda y \to x$, the $n$ must be $\con{S} \A \con{Z}$, 
+This would suggest that the interpretation must be parameterized by the current environment, as:
+\begin{code}
+\=L \key{data}~\con{Env} \A (f :: \con{k} \to \con{Type}) \A (\var{as} :: [k]) ~\WHERE \\
+\=L \quad \con{ENil} :: \con{Env} \A f \A [\,] \\
+\=L \quad \con{ECons} :: f \A a \to \con{Env} \A f \A \var{as} \to \con{Env} \A f \A (a : \var{as}) \\[\blanklineskip]%
+\=L \key{type}~\con{SEnv} = \con{Env} \A \con{Proxy} \\[\blanklineskip]
+\=L \key{newtype}~\con{U} \A a = \con{U} \A \{ \var{unU} :: \con{SEnv} \A \var{env} \to \con{D} \A \var{env} \A a) \}
+\end{code}
+This makes us to know the nesting depth of $\lambda$s. Especially, we can shift variables by comparing the depth. 
+\begin{code}
+\=L \var{diff} :: \con{SEnv} \A \var{env} \to \con{SEnv} \A \var{env'} \to \con{In} \A a \A \var{env} \to \con{In} \A a \A \var{env'}
+\end{code}
+This function is meaning full if the second environment is no smaller than the first one, and indeed partial. But, the unembedding guarantees 
+that the use of $\var{diff}$ in the conversion below always succeeds. 
+\begin{code}
+\=L \key{instance}~\con{STLC} \A \con{U}~ \WHERE \\
+\=L \quad {} 
+ \=I \var{lam} \A f = \con{U} \DOLLAR \lambda \gamma \to {} \\
+ \=I \qquad {} 
+      \=l \LET~\gamma_a = \con{ECons} \A \con{Proxy} \A \gamma \\
+      \=l \IN~ \con{Lam} \DOLLAR \var{unU} \A (f \A (\con{U} \DOLLAR \lambda \gamma' \to \con{Var} \A (\var{diff} \A \gamma_a \A \gamma' \A \con{Z}))) \A \gamma_a\\
+ \=I \var{app} = \dots \COMMENT{straightforward} \dots 
+\end{code}
+
+
+
+\bibliographystyle{plainnat}
+\bibliography{main}
+
+\end{document}
