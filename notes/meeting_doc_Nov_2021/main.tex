@@ -2,7 +2,10 @@
 
 \usepackage{fullpage}
 
+\usepackage{textcomp}
+
 \usepackage{xspace}
+\usepackage{amssymb}
 \usepackage{mathtools}
 \usepackage{proof}
 \usepackage{polytable}
@@ -32,6 +35,45 @@
 \setlength{\belowdisplayskip}{0pt}%
 #1}}}
 
+% Taken from https://tex.stackexchange.com/a/133093
+\makeatletter
+\newcommand*{\pmzerodot}{%
+  \nfss@text{%
+    \sbox0{$\vcenter{}$}% math axis
+    \sbox2{0}%
+    \sbox4{0\/}%
+    \ooalign{%
+      0\cr
+      \hidewidth
+      \kern\dimexpr\wd4-\wd2\relax % compensate for slanted fonts
+      \raise\dimexpr(\ht2-\dp2)/2-\ht0\relax\hbox{%
+        \if b\expandafter\@car\f@series\@nil\relax
+          \mathversion{bold}%
+        \fi
+        $\cdot\m@th$%
+      }%
+      \hidewidth
+      \cr
+      \vphantom{0}% correct depth of final symbol
+    }%
+  }%
+}
+\newcommand*{\pmzeroslash}{%
+  \nfss@text{%
+    \sbox0{0}%
+    \sbox2{/}%
+    \sbox4{%
+      \raise\dimexpr((\ht0-\dp0)-(\ht2-\dp2))/2\relax\copy2 %
+    }%
+    \ooalign{%
+      \hfill\copy4 \hfill\cr
+      \hfill0\hfill\cr
+    }%
+    \vphantom{0\copy4 }% correct overall height and depth of the symbol
+  }%
+}
+\makeatother
+
 \makeatletter
 %mathindent has to be defined
 \@ifundefined{mathindent}%
@@ -41,6 +83,8 @@
 \setlength\mathindent{1.8em plus 0em minus 0.2em}%{1.5em plus 0em minus 0.5em}
 \newlength{\blanklineskip}
 \setlength{\blanklineskip}{0.66084ex}
+
+
 
 
 \title{Unembedded Incremetalized Calculus: Compositional Approach to Cache-Transfer Style}
@@ -121,6 +165,8 @@ $\sem{A} \to \sem{\Gamma}$ is isomorphic to $\forall s. (\sem{\Gamma} \to s) \to
 
 \subsection{Incrementalized $\lambda$ Calculus}
 
+\newcommand{\NilChange}{{\bullet}}
+
 \citet{CaiGRO14}'s incrementalized $\lambda$ calculus (ILC, for short) interprets $\lambda$ calculus so that it translates updates to avoid 
 recomputation of results. An interesting point of the calculus is treatment of functions so that a system can have higher-order APIs such as $\var{map}$ and $\var{fold}$-like operations. 
 
@@ -138,11 +184,11 @@ A function $f$ and its update $\var{df}$ must satisfy the law:
 \[
   (f \oplus \var{df}) \A (a \oplus \var{da}) = f \A a \oplus \var{df} \A a \A \var{da} 
 \]
-Especially, when $\var{da} = 0$, a unit of $\oplus$ called nil update, we have 
+Especially, when $\var{da} = \NilChange$, a unit of $\oplus$ called nil update, we have 
 \(
-(f \oplus \var{df}) \A a  = f \A a \oplus \var{df} \A a \A 0\text{.}
+(f \oplus \var{df}) \A a  = f \A a \oplus \var{df} \A a \A \NilChange\text{.}
 \) 
-In general, $\var{df} \A a \A 0$ may not be a nil change, intuitively because a function update involves 
+In general, $\var{df} \A a \A \NilChange$ may not be a nil change, intuitively because a function update involves 
 both a change on free variables in $f$ and a derivative after the reflection of the update to free variable. 
 If the former information is an nil update, meaning that it does not change the function itself, a function 
 update defines a derivative of $f$, which is obtained from the above equation by with $(f \oplus \var{df}) = f$. 
@@ -161,12 +207,333 @@ Notice that
 \]
 so there is no problem on the treatment of function values. 
 
-The tupled semantics, however, is almost useless, because tupled computation involves the original semantics. 
-No time is saved by the incrementalized computation. This is unavoidable as their derivatives require the original argument as $A \to \Delta A \to \Delta B$. This also contradicts our expectation of how incrementalized version is used: an incrementalized version of $f : A \to B$, after a first run, 
-should be able to transform $\Delta A$ to $\Delta B$, repeatedly. 
+The tupled semantics, however, is almost useless, because it does not support a typical use case of incremental computation: 
+after an initial run, updates on the input can be translated to updates on the output, where we do not know what updates will come at
+the initial run. 
+The recomputation of the original values cannot be unavoidable in the tupled semantics.
+\kztk{Should we move the following?}
+Morihata \todo{his WPTE 2020 paper} addressed this issue by using Yoneda embedding\footnote{The original presentation does not mention Yoneda embedding. This explanation of his idea via Yoneda is our original.} to represent $\Delta A \to \Delta B$ as $(s \to \Delta A) \to s \to \Delta B$ where $s$ is abstract, 
+so that we can obtain $\sem{ \Gamma \vdash e : A }^\mathrm{t} \in \forall s.\, \sem{\Gamma} \x (s \to \Delta \sem{\Gamma}) \to \sem{A} \x (s \to \Delta \sem{A})$, where abstract $s$ is universally quantified. 
+In this approach, we can pass $\var{id} : \Delta \sem{\Gamma} \to \Delta \sem{\Gamma}$ in the initial run to obtain the update translator $(\Delta \sem{\Gamma} \to \Delta \sem{A})$ that can be 
+used to translate a next single update on the input to one on the output. This approach can easily extended to consecutive translations of updates easily.
+However, the functional representation means that the computation cannot be shared for multiple uses of variables. 
+% One would think that this issue can be addressed by explicit sharing (\ie, \key{let}s). To implement a such construct, we need to give its semantics $\var{let}$ as:
+% \[
+% \ninfer{\var{let}}
+% {
+%   \sem{\Gamma} \x (s \to \Delta \sem{\Gamma}) \to \sem{B} \x (s \to \Delta \sem{B}) 
+% }
+% {
+%   \sem{\Gamma} \x \sem{A} \x (s \to \Delta \sem{\Gamma} \x \Delta \sem{A}) \to \sem{B} \x (s \to \Delta \sem{B}) 
+%   \qquad 
+%   \sem{\Gamma} \x (s \to \sem{\Gamma}) \to \sem{A} \x (s \to \Delta \sem{A})
+% }
+% \]
+
 
 Another issue of the original ILC is that they cannot support separation of updates. It is rather common that updates $\var{da} : \Delta A$
-is represented by compositions of atomic updates $\var{da} = \var{da}_1 \oplus \dots \oplus \var{da}_n$, where we abuse $\oplus$ also for composition in addition to application. \todo{Say more}
+is represented by compositions of atomic updates $\var{da} = \var{da}_1 \oplus \dots \oplus \var{da}_n$.
+% \footnote{
+% Note that we can always find a composition operator by using Cayley representations. Let us write $\Delta_\mathrm{orig} A$ for 
+% the original delta type that only supports applications $(\oplus) : A \to \Delta_\mathrm{orig} \to A$. Then, we can (re)define $\Delta A$ as $A \to A$
+% where $a \oplus \var{da} = \var{da} \A a$, $\var{da}_1 \oplus \var{da}_2 = \var{da}_2 \circ \var{da}_1$, and the original delta $\var{da}_\mathrm{orig}$ is lifted as $\lambda x.(x \oplus \var{da}_\mathrm{orig})$.
+% } 
+(Here, we abuse the notation to use $\oplus$ both for composition and application.) 
+A derivative is then expected to handle such atomic updates one by one, meaning that the equation 
+\[
+\partial f \A a \A (\var{da}_1 \oplus \var{da}_2) = \partial f \A a \A \var{da}_1 \oplus \partial f \A (a \oplus \var{da}_1) \A \var{da}_2 \tag{\textsc{DistILC}}\label{eq:dist-ilc}
+\]
+is expected to hold. However, this equation does not always hold for function updates, as they may not be derivatives. The \var{map} API for sequences discussed in 
+\citet{GiarrussoRS19} is a good example in which this non-distribution becomes problematic. The API has type $(a \to b) \to \con{Seq} \A a \to \con{Seq} \A b$, 
+and thus its incrementalized version should have type $(a \to b) \to (a \to \Delta a \to \Delta b) \to \con{Seq} \A a \to \Delta (\con{Seq} \A a) \to \Delta (\con{Seq} \A b)$. 
+Here, $\Delta (\con{Seq} \A a)$ is represented as a list\footnote{Difference lists are used in the implementation of \citet{GiarrussoRS19} for performance.} of atomic changes, which include 
+updates on single elements. We write such an update on the $i$th element as \(\con{At} \A i \A \var{da}\). 
+Suppose that the incrementalized version of \var{map} received $[\con{At} \A i \A \var{da}_i]$. Then, one might think it is sufficient to call the given function update $\var{df}$ to the element $a_i$ of corresponding position $i$ to yield $[\con{At} \A i \A (\var{df} \A a_i \A \var{da}_i)]$. But, this is correct only when $\var{df}$ is a derivative; otherwise, $\var{df}$ changes to the function itself. 
+So, to handle such function changes we need to call $\var{df} \A a_j \A \NilChange$ for other elements, and the correct output is: 
+\[
+[ \con{At} \A 0 \A (\var{df} \A a_0 \A \NilChange), \dots, \con{At} \A (i-1) \A (\var{df} \A a_{i-1} \A \NilChange), \con{At} \A i \A (\var{df} \A a_i \A \var{da}_i), \con{At} \A (i+1) \A (\var{df} \A a_{i+1} \A \NilChange), \dots, \con{At} \A n \A (\var{df} \A a_n \A \NilChange) ]
+\]
+This result suggests that it is hard to translate updates $[\con{At} \A {i_1} \A \var{da}_{i_1}, \con{At} \A {i_2} \A \var{da}_{i_2},\dots]$ one by one, especially when some updates refer to the same position. 
+
+\subsection{Cache-Transfer Style}
+
+\citet{GiarrussoRS19} address the recomputation issue of the original ILC by using caches. For a function $f : A \to B$, an incrementalized function in their 
+system has the following type.\footnote{In the original paper, the second function takes $A$ in addition. This, however, can be realized by taking $C = C' \x A$ and is not regarded essential for formalization in this paper.}
+\[
+  (A \to B \x C) \x (\Delta A \to C \to \Delta B \x C)
+\]
+Here, $C$ is a datatype called cache, which may be different for each computation (and thus cannot be determined solely by $A$ and $B$ in general). 
+The type above would be self-explanatory: we first build a cache together with the result by using the first component, 
+and then repeatedly translate updates on $A$ to ones on $B$ by using the second component. 
+Notice that the cache-transfer-style supports the translation of multiple updates as: 
+\begin{align*}
+ \cts f \A (\var{da}_1 \oplus \var{da}_2) 
+ & = (\oplus) \OpFMAP \cts f \A \var{da_1} \OpMULT \cts f \A \var{da}_2 \\
+ & = \lambda c.\:
+       \bbt \LET~(\var{db}_1,c_1) = \cts f \A \var{da}_1 \A c~\IN    \\
+            \LET~(\var{db}_2,c_2) = \cts f \A \var{da}_2 \A c_1~\IN \\
+       \IN~(\var{db}_1 \oplus \var{db}_2, c_2) 
+       \ee
+ \tag{\textsc{DistCTS}}\label{eq:dist-cts}
+\end{align*}
+Here, we used \con{Applicative} operators ($\OpFMAP$ and $\OpMULT$) as if the $C \to \Delta B \x C$ part represents a state monad. 
+More precisely, $\cts f$ that respects the structure 
+
+
+Cache is sometimes the original argument as the \var{div} function below. 
+\begin{code}
+\=L \var{div}_\mathrm{init} :: \mathbb{R} \x \mathbb{R} \to \mathbb{R} \x \mathbb{R} \x \mathbb{R}\\
+\=L \var{div}_\mathrm{init} \A (x,y) = (x / y, (x, y))\\[\blanklineskip]%
+\=L \cts {\var{div}} :: \Delta (\mathbb{R} \x \mathbb{R}) \to \mathbb{R} \x \mathbb{R} \to \Delta (\mathbb{R} \x \mathbb{R}) \x \mathbb{R} \x \mathbb{R}\\
+\=L \cts {\var{div}} \A (\var{dx}, \var{dy}) \A (x,y) = (x + dx) / (y + dy) - x / y 
+\end{code}
+Here, we assumed $\Delta \mathbb{R} = \mathbb{R}$ with $a \oplus \var{da} = a + \var{da}$, and $\Delta (A \x B) = \Delta A \x \Delta B$. 
+(We used $\mathbb{R}$ as we do not focus on the precision issues.)
+Sometimes, it may be different from the original argument. For example, for $\var{concat} : \con{Seq} \A (\con{Seq} \A A) \to \con{Seq} \A A$, 
+the corresponding cache is lengths of inner sequences of type $\con{Seq} \A \con{Int}$. 
+
+
+
+% Having $A$ would suggest that recomputation must happen but it is actually avoided by storing intermediate $A$s in cache; 
+% that is, they actually are handled as if the cache contains $A$. 
+% \[
+%  (A \to B \x (C,A)) \x (\Delta A \to (C, A) \to \Delta B \x (C, A))
+% \]
+
+
+
+
+\subsection{Recovering Distributivity for Function Updates}
+
+
+The accompanied implementation to \citet{GiarrussoRS19} also discusses 
+the distributivity issue, which itself is orthogonal to the cache-transfer style.
+The basic idea is to separate a function update to $f$ into a derivative of $f$ and a change to values of free variables in $f$, because 
+the former one is distributive (in the sense of \ref{eq:dist-ilc} and \ref{eq:dist-cts}). 
+
+Let us use the original formalization to explain the idea. 
+Suppose that $\var{df} : A \to \Delta A \to \Delta B$ is separated into $\var{df}_0 : A \to \Delta B$ and $\partial f : A \to \Delta A \to \Delta B$, where 
+$\partial f$ must be a derivative of the corresponding function, in a sense that $\var{df} \A a \A \var{da} = \var{df}_0 \A a \oplus \partial f \A a \A \var{da}$.
+Then, the change to the function is defined accordingly by 
+\[
+ f \oplus (\var{df}_0, \partial f) = \lambda x. f \A x \oplus \var{df}_0 \A x
+\]
+where $\partial f$ is not used at all as derivatives are nil changes. Now we have 
+\[
+ \var{df} \A a \A (\var{da}_1 \oplus \var{da}_2) = \var{df}_0 \A a \oplus \partial f \A a \A \var{da}_1 \oplus \partial f \A (a \oplus \var{da}_1) \A \var{da}_2 
+\]
+So that we can translate updates one by one. For example, consider the \var{map} case mentioned earlier. 
+Then, the translation result of $[\con{At} \A i \A \var{da}_i]$ is now:
+\[
+[ \con{At} \A 0 \A (\var{df}_0 \A a_0), \dots, \con{At} \A n \A (\var{df}_0 \A a_n) ] \oplus [\con{At} \A i \A (\partial f \A a_i \A \var{da}_i)]
+\]
+So, a sequence $[\con{At} \A {i_1} \A \var{da}_{i_1}, \con{At} \A {i_2} \A \var{da}_{i_2},\dots]$ of updates is translated to 
+\[
+[ \con{At} \A 0 \A (\var{df}_0 \A a_0), \dots, \con{At} \A n \A (\var{df}_0 \A a_n) ] \oplus [\con{At} \A i_1 \A (\partial f \A a^{(1)}_{i_i} \A \var{da}_{i_1}), \con{At} \A (\partial f \A a^{(2)}_{i_2} \A \var{da}_{i_2}), \dots]
+\]
+where $a^j_i$ is the $i$th element of the sequence after $[\con{At} \A {i_1} \A \var{da}_{i_1}, \con{At} \A {i_2} \A \var{da}_{i_2},\dots, \con{At} \A {i_j} \A \var{da}_{i_j}]$ has been reflected. 
+
+For the cache-transfer system, a direct adaptation of the above idea is to use $\var{df}_0 : C \to \Delta B \x C$ and $\cts f : \Delta A \to C \to \Delta B \x C$.
+This representation works but has an issue in performance. These functions are obtained from an incrementalized function for a $\lambda$-body term-in-context 
+$(h_\mathrm{init}, \cts h) : (\Gamma \x A \to C) \x (\Delta \Gamma \x \Delta A \to C \to \Delta B \x C)$ (ignored $\sem{-}$ for simplicity) by 
+$\var{df}_0 \A c = \cts h \A (\var{d\theta}, \NilChange) \A c$ and $\cts f \A \var{da} \A c= \cts h \A (\NilChange, \var{da}) \A c$---involving two calls of $\cts h$---while the separation is needed when 
+we handle atomic updates. 
+So, their implementation produces such functions in an on-demand fashion; this exposes both $\Gamma$ and $C$, meaning that functions produced in different places usually have different types. 
+This will not be a problem in their original framework, as they assumed an untyped system. 
+Though their proofs do not cover this treatment of function updates, we believe that this treatment cannot yield runtime type errors. 
+
+\subsection{Notes on Monoids}
+
+We are expecting that $(\Delta A, \oplus, \NilChange)$ forms a monoid, but this does not apply to function changes, because $\oplus$ always ignores derivative information. 
+This may be caused by the fact that true function changes is only $A \to \Delta B$ and the derivative information is included just because of convenience to handle higher-order APIs (such as $\var{map}$).
+A solution is to store the derivative information to the ordinary transformation part. That is, we define the semantics of type as:
+\begin{align*}
+ \sem{ A \to B }        &= (\sem{A} \to \sem{B}) \x (\sem{A} \to \Delta \sem{A} \to \Delta \sem{B}) \\
+ \Delta \sem{ A \to B}  &= \sem{A}  \to \Delta \sem{B} 
+\end{align*}
+and define the semantics as:
+\begin{align*}
+ \sem{ \Gamma \vdash e : A }          &\in \sem{\Gamma} \to \sem{A} \\ 
+ \Delta \sem{ \Gamma \vdash e : A }  &\in \sem{\Gamma} \to \Delta \sem{\Gamma} \to \Delta \sem{A} 
+  \\
+ \sem{ \Gamma \vdash x : A} \A \rho &= \rho(x) 
+  \\
+ \sem{ \Gamma \vdash \lambda x. e : A \to B} \A \rho &= 
+   (\lambda a. \sem{ \Gamma, x : A \vdash e : B } \A (\rho, a), 
+    \lambda a. \lambda \var{da}.\: 
+      \Delta \sem{ \Gamma, x : A \vdash e : B } \A (\rho, a) \A (\NilChange, \var{da}))
+  \\
+ \sem{ \Gamma \vdash e_1 \A e_2 : B} \A \rho &= f \A a                                                                                                 
+   \qquad \WHERE~
+     \bbt
+       a &= \sem{ \Gamma \vdash e_2 : A } \A \rho      \\
+       (f, \dontcare) &= \sem{ \Gamma \vdash e_1 : A \to B } \A \rho 
+     \ee
+  \\
+  \Delta \sem{ \Gamma \vdash x : A} \A \rho \A \var{d\rho} &= \var{d\rho}(x) 
+  \\
+  \Delta \sem{ \Gamma \vdash \lambda x. e : A \to B} \A \rho \A \var{d\rho} 
+  &= 
+    \lambda a. \Delta \sem{ \Gamma, x : A \vdash e : B} \A (\rho, a) \A (\var{d\rho}, \NilChange) 
+  \\
+  \Delta \sem{ \Gamma \vdash e_1 \A e_2 : B } \A \rho \A \var{d\rho} 
+  &= \var{df} \A a \oplus \partial f \A a \A \var{da} 
+    \qquad \WHERE~
+      \bbt
+            a &= \sem{ \Gamma \vdash e_2 : A } \A \rho \\
+     \var{da} &= \Delta \sem{ \Gamma \vdash e_2 : A} \A \rho \A \var{d\rho} \\
+     \var{df} &= \Delta \sem{ \Gamma \vdash e_1 : A \to B } \A \rho \A \var{d\rho} \\
+     (\dontcare, \partial f) &= \sem{ \Gamma \vdash e_1 : A \to B} \A (\rho \oplus \var{d\rho}) 
+     \ee
+\end{align*}
+
+Some apparent inefficiency in the above definition would disappear in the cache-transfer style, while there is another issue 
+in handling function updates: cache must be exposed as 
+\begin{align*}
+ \sem{ A \to B }        &= (\sem{A} \to \sem{B} \x C) \x (\Delta \sem{A} \to C \to \Delta \sem{B} \x C) \\
+ \Delta \sem{ A \to B}  &= C \to \Delta \sem{B} \x C 
+\end{align*}
+
+\section{Unembedding Cache-Transfer System}
+
+\subsection{Embedding of First-Order Fragments}
+If we ignore function values and updates for a while, 
+it is rather easy to define the CTS semantics of terms-in-context as: 
+\begin{align*}
+  {\sem{ \Gamma \vdash e : A }} 
+  &\in \sem{\Gamma \vdash - : A} =  \exists C.\: (\sem{\Gamma} \to \sem{A} \x C) \x (\Delta \sem{\Gamma} \to C \to \Delta \sem{A} \x C)
+  \\
+  \sem{ \Gamma \vdash x : A } 
+  &= \UnitType, \lambda \rho. (\rho(x), \UnitValue), \lambda d\rho. \lambda c. \, (d\rho(x), c)
+  \\
+  \sem{ \Gamma \vdash (e_1,e_2) : A_1 \x A_2 } 
+  &= \var{pairSem} \A \sem{ \Gamma \vdash e_1 : A_1 } \A \sem{\Gamma \vdash e_2 : A_2}
+  \\
+  \sem{ \Gamma \vdash \ms{op} \A e : B} 
+  &= \var{opSem}_{\ms{op} : A \to B} \A \sem{ \Gamma \vdash e : A }
+\end{align*}
+where 
+\begin{alignat*}{3}
+&\var{pairSem} : \sem{ \Gamma \vdash - : A_1 } \to \sem{ \Gamma \vdash - : A_2 } \to \sem{ \Gamma \vdash - : A_1 \x A_2 } \\
+&\var{pairSem} \A (C_1,\init{f_1},\cts{f_1}) \A (C_2,\init{f_2}, \cts{f_2})  = C_1 \x C_2, \init{h}, \cts{h} 
+\\
+& \quad {\WHERE~
+     \bbt 
+        \init{h} \A \rho = \LET~\{(a_i,c_i) = \init{f_i} \A \rho\}_i~\IN~((a_1,a_2),(c_1,c_2))\\
+        \cts{h} \A d\rho \A (c_1,c_2) = \LET~\{ (\var{da}_1,c_1') = \cts{f_i} \A d\rho \A c_i \}_i~\IN~((\var{da}_1,\var{da}_2),(c'_1,c'_2))
+     \ee}\\
+&\var{opSem}_\ms{op : A \to B} : \sem{ \Gamma \vdash - : A} \to \sem{ \Gamma \vdash - : B}\\
+&\var{opSem}_\ms{op : A \to B} \A (C, \init{f}, \cts{f}) = C \x C_{\ms{op}} , \init{h}, \cts{h} \\
+& \quad \WHERE~
+      \bbt
+        \init{h} \A \rho = \LET~\{(a, c) = \init{f} \A \rho; (b, c_{\ms{op}}) = \init{\ms{op}}\} \A a~\IN~ (b, (c, c_\ms{op})) \\
+        \cts{h} \A d\rho \A (c,c_\ms{op}) = \LET~\{ (\var{da}, c') = \cts{f} \A \rho \A c; (\var{db}, c'_\ms{op}) = \cts{\ms{op}} \A \var{da} \A c_\ms{op} \}~\IN~(\var{db}, (c', c'_\ms{op}))
+      \ee 
+\end{alignat*}
+Here, we used the pair constructor whose first component is a type to represent existential types as in Agda.
+Roughly speaking, $\ms{op} : A \to B$ here represents a first-order API such as $\var{concat}$ and $\var{div}$, which 
+consists of a cache type $C_\ms{op}$, an initializer $\init{\ms{op}} : A \to B \x C_\ms{op}$ and an update translator $\cts{\ms{op}} : \Delta A \x C_\ms{op} \to \Delta B \x C_\ms{op}$. 
+Such APIs can be $n$-ary; arguments for such operators can be constructed via $\var{pair}$. 
+
+
+In addition to the constructs above, we also consider $\LET$s for explicit sharing, which is also useful for incrementalized computation. 
+\[\bb
+\sem{ \Gamma \vdash \LET~x = e_1~\IN~e_2 : B }
+= \var{letSem} \A \sem{ \Gamma \vdash e_1 : A } \A \sem{ \Gamma, x : A \vdash e_2 : B}\\[\blanklineskip]%
+\var{letSem} : \sem{ \Gamma \vdash - : A } \to \sem{ \Gamma, x : A \vdash - : B } \to \sem{ \Gamma \vdash : B }\\
+\var{letSem} \A (C_1, \init{f_1}, \cts{f_1}) \A (C_2, \init{f_2}, \cts{f_2}) =
+C_1 \x C_2, \init{h}, \cts{h} \\
+\quad \WHERE~
+ \bbt
+    \init{h} \A \rho = \LET~(a, c_1) = \init{f_1} \A \rho ; (b, c_2) = \init{f_2} \A (\rho, a)~\IN~(b, (c_1,c_2))\\
+    \cts{h} \A \var{d\rho} \A (c_1,c_2) = \LET~(\var{da}, c_1') = \cts{f_1} \A d\rho \A c_1; (\var{db}, c_2') = \cts{f_2} \A (d\rho, \var{da}) \A c_2~\IN~(\var{db}, (c_1', c_2'))
+ \ee
+\ee\]
+
+This is a typical example that embedding via unembedding~\cite{Atkey09, AtLY09} is useful. 
+Preparing a type class that represents a syntax 
+\begin{code}
+\=L \key{data}~\key{family}~\Delta a = \dots \\
+\=L \DATA~\con{CTS}\A a \A b~\WHERE ~ \LCOMMENT{GADT-style definition for existential types}\\
+\=L \quad \con{CTS} :: (a \to (b, c)) \to (\Delta a \to c \to (\Delta b, c)) \to \con{CTS} \A a \A b \\[\blanklineskip]%
+\=L \CLASS~\con{CTSExp} \A e~\WHERE \\
+\=L \quad \var{pair} :: e \A a \to e \A b \to e \A (a, b) \\
+\=L \quad \var{lift} :: \con{CTS} \A a \A b \to e \A a \to e \A b \\
+\=L \quad \var{share} :: e \A a \to (e \A a \to e \A b) \to e \A b 
+\end{code}
+we can define its instance as:
+\begin{code}
+\=L \key{newtype}~\con{UnCTS}~a = \con{UnCTS}~\{ \var{cts} :: \forall \var{env}.\, \con{SEnv} \A \var{env} \to \con{CTS} \A (\con{Env} \A \var{as}) \A a) \}\\
+\=L \key{instance} \A \con{CTSExp} \A \con{UnCTS}~\WHERE~\dots \COMMENT{omitted as straightforward adaptation of unembedding}\dots
+%\=L \quad \var{pair} \A e_1 \A e_2 = \con{UnCTS} \DOLLAR \lambda \gamma \to \var{pairSem} \A (\var{cts} \A e_1 \A \gamma) \A (\var{cts} \A e_2 \A \gamma)
+\end{code}
+Having HOAS (more precisely, the tagless final~\cite{CaKS09} here) interface not only relieve the syntactic pain of using de Bruijn indexed terms, 
+but also we can use Haskell functions to construct abstract syntax trees more effectively. 
+The sharing operation $\var{share}$ plays an important role here; it enables us to distinguish the host-level sharing (that copies ASTs and duplicates computation) from 
+the guest-level explicit sharing (\ie, \key{let}).
+
+\subsection{Embedding of Second-Order APIs}
+
+One of the strength of the unembedding is that it can support embedding of the second-order language constructs~\todo{citation}, \ie, language constructs with binders such as $\key{let}$. 
+For example, the $\var{map}$ API can be seen as a second-order language construct, as: 
+\[
+\infer
+{
+ \Gamma \vdash \var{map} \A (x.e_1) \A e_2 : \con{Seq} \A B 
+}
+{
+ \Gamma, x : A \vdash e_1 : B 
+ & 
+ \Gamma \vdash e_2 : \con{Seq} \A A
+}
+\]
+Accordingly, if we have a semantic function for the $\var{map}$ API as:
+\[
+\var{mapSem} : \sem{ \Gamma, x : a \vdash - : b } \to \sem{ \Gamma \vdash - : \con{Seq} \A a} \to  \sem{ \Gamma \vdash - : \con{Seq} \A b }
+\]
+we can extend the syntax 
+\begin{code}
+\=L \key{class}~\con{CTSExp} \A e \To \con{HasMap} \A e~\key{where}~\\
+\=L \quad 
+        \var{map} : (e \A a \to e \A b) \to e \A (\con{Seq} \A a) \to (\con{Seq} \A b) 
+\end{code}
+and give its implementation similarly to $\var{lam}$ in the previous section. 
+\begin{code}
+\=L \key{instance}~\con{HasMap} \A \con{UnCTS}~\WHERE~\dots 
+\end{code}
+We omit the concrete definition as it is a routine. 
+
+In general, for a construct 
+\[
+\infer
+{ 
+ \Gamma \vdash \con{c} \A \{ \V{x}.e_i \}_{1 \le i \le n} : C
+}
+{
+  \{ \Gamma, \V{x : A_i} : B_i \}_{1 \le i \le n}
+}
+\]
+with a corresponding semantic function 
+\[
+\var{sem} : \sem{ \Gamma, \V{x : A_1} \vdash - : B_1} \to \dots \to \sem{ \Gamma, \V{x : A_n} \vdash - : B_n} \to \sem{ \Gamma \vdash - : C }
+\]
+we can have the following method in a class that represents the syntax. 
+\begin{code}
+\=L \key{class}~\dots \To \con{HasSyn} \A e~\WHERE\\
+\=L \quad \var{syn} :: (\V{e \A A_1} \to e \A B_1) \to \dots \to (\V{e \A A_n} \to e \A B_n) \to e \A C 
+\end{code}
+Leveraging the type-level programming power of Haskell, we can prepare one method to lift all the semantics functions like $\var{sem}$, but in this presentation we 
+insist on having individual methods such as $\var{map}$ for semantic functions. 
+
+Then, let us focus on how we can implement $\var{mapSem}$, as it may share common patterns. An observation is that it is rather easier to 
+implement the function 
+\[
+\var{mapSem}' : \sem{ \Gamma, x : a \vdash - : b } \to \sem{ \Gamma, y : \con{Seq} \A a \vdash \con{Seq} \A b }
+\]
+and define the $\var{mapSem}$ as $\var{mapSem} \A e_1 \A e_2 = \var{letSem} \A e_2 \A (\var{mapSem}' \A e_1)$
+because it reduces the number of semantic objects to be handled from three to two. Even for $\con{CTS}$, this reduces a tedious 
+manipulation of caches and existential quantifiers. But, this impact gets bigger when we consider more complex semantic domain in later. 
+
 
 
 \bibliographystyle{plainnat}
