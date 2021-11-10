@@ -571,7 +571,7 @@ where
 & \quad \WHERE~
       \bbt
         \init{h} \A \rho = \LET~\{(a, c) = \init{f} \A \rho; (b, c_{\ms{op}}) = \init{\ms{op}}\} \A a~\IN~ (b, (c, c_\ms{op})) \\
-        \cts{h} \A d\rho \A (c,c_\ms{op}) = \LET~\{ (\var{da}, c') = \cts{f} \A \rho \A c; (\var{db}, c'_\ms{op}) = \cts{\ms{op}} \A \var{da} \A c_\ms{op} \}~\IN~(\var{db}, (c', c'_\ms{op}))
+        \cts{h} \A d\rho \A (c,c_\ms{op}) = \LET~\{ (\var{da}, c') = \cts{f} \A d\rho \A c; (\var{db}, c'_\ms{op}) = \cts{\ms{op}} \A \var{da} \A c_\ms{op} \}~\IN~(\var{db}, (c', c'_\ms{op}))
       \ee 
 \end{alignat*}
 Here, we used the pair constructor whose first component is a type to represent existential types as in Agda.
@@ -700,11 +700,108 @@ We have the following observations from the behavior of $\var{mapSem}'$.
 \end{itemize}
 
 
-\subsection{Cache-Size Reduction}
+\subsection{Cache-Size Reduction Especially for Recomputation}
 
+\newcommand{\orig}[1]{#1^\mathrm{o}}
+\newcommand{\recomp}[1]{#1^\mathrm{r}}
+\newcommand{\Restrict}[2]{#1|_{#2}}
 
+Above, we have seen that we need to store entire $\sem{\Gamma}$ to implement the \var{map} API, which is costly and introduces redundancy in cache. For $\var{map} \A (\lambda x. \dots \var{map} \A (\dots) )$, it 
+will store both $\sem{\Gamma}$ and $\sem{\Gamma, x : A}$---whole $\sem{\Gamma}$ is copied. This space inefficiency is addressed by using the following ideas. 
+\begin{itemize}
+\item We statically infer the variables used in an expression so that an initializer and a delta translator take a subpart of the environment needed for the computation. 
+\item Also, we compositionally construct environments to store. Notice that such environments are needed only when recomputation is required in a delta translator, as in \var{map}. 
+\end{itemize}
+So, now a term-in-context $\Gamma \vdash e : A$ is interpreted as
+\[
+ \sem{\Gamma \vdash e : A } = \exists C. \exists \orig{U}. \exists \recomp{U}. 
+  (\sem{ \Restrict{\Gamma}{\orig{U}}} \to \sem{A} \x C) \x 
+  (\Delta \sem{ \Restrict{\Gamma}{\orig U} } \to \sem { \Restrict{\Gamma}{\recomp U} } \to C \to \Delta \sem{A} \x C)
+\]
+Here, $U$ is a set of variables that are used in a designated computation, and $\Restrict{\Gamma}{U}$ represents the extraction of the used part. 
+When we combine the two computation, we need to merge uses, which is done by the following function.
+\[
+\var{mergeUses} : (U_1 : \con{Use}) \to (U_2 : \con{Use}) 
+            \to \exists U. (\forall \Gamma. \sem{\Restrict{\Gamma}{U}} \to \sem{\Restrict{\Gamma}{U_1}}) 
+                            \x  (\forall \Gamma. \sem{\Restrict{\Gamma}{U}} \to \sem{\Restrict{\Gamma}{U_2}}) 
+\]
+(For simplicity of presentation, we used Agda-like dependent products and sums here. In Haskell implementation, we will use corresponding singleton types.)
+\[
+\sem{ \Gamma \vdash x : A } = \UnitType, \{ x \}, \emptyset, (\lambda a. (a, \UnitValue)), (\lambda \var{da}.\lambda \dontcare.\lambda c.(\var{da}, c))
+\]
+Here, we abuse the notation to write a singleton environment as the element that it contains in the same way. 
+
+For products and primitives, it suffices to redefine the corresponding semantic functions. 
+\begin{alignat*}{3}
+&\var{pairSem} : \sem{ \Gamma \vdash - : A_1 } \to \sem{ \Gamma \vdash - : A_2 } \to \sem{ \Gamma \vdash - : A_1 \x A_2 } \\
+&\var{pairSem} \A (C_1, \orig{U_1}, \recomp{U_2}, \init{f_1},\cts{f_1}) \A (C_2, \orig{U_2}, \recomp{U_2},\init{f_2}, \cts{f_2})  = C_1 \x C_2, \orig{U}, \recomp{U}, \init{h}, \cts{h} 
+\\
+& \quad {\WHERE~
+     \bbt 
+        (\orig{U}, \orig{\var{ext}_1}, \orig{\var{ext}_2}) = \var{mergeUses} \A \orig{U_1} \A \orig{U_2}\\
+        (\recomp{U}, \recomp{\var{ext}_1}, \recomp{\var{ext}_2}) = \var{mergeUses} \A \recomp{U_1} \A \recomp{U_2} \\
+        \init{h} \A \rho = \LET~\{(a_i,c_i) = \init{f_i} \A (\orig{\var{ext}_i} \A \rho)\}_i~\IN~((a_1,a_2),(c_1,c_2))\\
+        \cts{h} \A d\rho \A \rho \A (c_1,c_2) = \LET~\{ (\var{da}_1,c_1') = \cts{f_i} \A (\orig{\var{ext}_i} \A d\rho) \A (\recomp{\var{ext}_i} \A \rho) \A c_i \}_i~\IN~((\var{da}_1,\var{da}_2),(c'_1,c'_2))
+     \ee}\\
+&\var{opSem}_\ms{op : A \to B} : \sem{ \Gamma \vdash - : A} \to \sem{ \Gamma \vdash - : B}\\
+&\var{opSem}_\ms{op : A \to B} \A (C, \orig{U}, \recomp{U}, \init{f}, \cts{f}) = C \x C_{\ms{op}} , \orig{U}, \recomp{U}, \init{h}, \cts{h} \\
+& \quad \WHERE~
+      \bbt
+        \init{h} \A \rho = \LET~\{(a, c) = \init{f} \A \rho; (b, c_{\ms{op}}) = \init{\ms{op}}\} \A a~\IN~ (b, (c, c_\ms{op})) \\
+        \cts{h} \A d\rho \A \rho \A  (c,c_\ms{op}) = \LET~\{ (\var{da}, c') = \cts{f} \A d\rho \A \rho \A c; (\var{db}, c'_\ms{op}) = \cts{\ms{op}} \A \var{da} \A c_\ms{op} \}~\IN~(\var{db}, (c', c'_\ms{op}))
+      \ee 
+\end{alignat*}
+The definition of $\var{letSem}$ for this semantics is more interesting. 
+\[\bb
+\var{letSem} : \sem{ \Gamma \vdash - : A } \to \sem{ \Gamma, x : A \vdash - : B } \to \sem{ \Gamma \vdash : B }\\
+\var{letSem} \A (C_1, \orig{U_1}, \recomp{U_1}, \init{f_1}, \cts{f_1}) \A (C_2, \orig{U_2}, \recomp{U_2}, \init{f_2}, \cts{f_2}) =
+C, \orig{U}, \recomp{U}, \init{h}, \cts{h} \\
+\quad \WHERE~
+ \bbt
+    C = \begin{cases} 
+      C_1 \x C_2 \x A &\text{if}~x \in \recomp{U_2} \\
+      C_1 \x C_2      &\text{otherwise} 
+      \end{cases}\\
+    (\orig{U}, \orig{\var{ext}_1}, \orig{\var{ext}_2}) = \var{mergeUses} \A \orig{U_1} \A (\orig{U_2} \setminus \set{x})\\
+    (\recomp{U}, \recomp{\var{ext}_1}, \recomp{\var{ext}_2}) = \var{mergeUses} \A \recomp{U_1} \A (\recomp{U_2} \setminus \set{x})\\
+    \init{h} \A \rho = 
+      \bbt \LET~(a, c_1) = \init{f_1} \A (\orig{\var{ext}_1} \A \rho) ~\IN\\
+           \LET~(b, c_2) = \init{f_2} \A (\var{extend} \A x \A \orig{U_2} \A a \A (\orig{\var{ext}_2})) \A \rho)~\IN\\ 
+      \quad \IF~x \in \recomp{U_2}~\THEN~(b, (c_1,c_2,a))~\ELSE~(b,(c_1,c_2))
+      \ee \\
+    \cts{h} \A \var{d\rho} \A \rho = 
+      \begin{cases}
+        \lambda (c_1,c_2, a). 
+          \bbt 
+          \LET~(\var{da}, c_1') = \cts{f_1} \A (\orig{\var{ext}_1} \A d\rho) \A (\recomp{\var{ext}_1} \A \rho) \A c_1~\IN\\
+          \LET~a' = a \oplus \var{da} \\
+          \LET~(\var{db}, c_2') = \cts{f_2} \A (\var{extend} \A x \A \orig{U_2} \A \var{da} \A (\orig{\var{ext}_2} \A d\rho)) \A (\recomp{\var{ext}_2} \A \rho, a')  \A c_2~\IN\\
+          \quad (\var{db}, (c_1', c_2',a'))
+          \ee
+        & \text{if}~x \in \recomp{U_2} \\
+        \lambda (c_1,c_2). 
+          \bbt 
+          \LET~(\var{da}, c_1') = \cts{f_1} \A (\orig{\var{ext}_1} \A d\rho) \A (\recomp{\var{ext}_1} \A \rho) \A c_1~\IN\\
+          \LET~(\var{db}, c_2') = \cts{f_2} \A (\var{extend} \A x \A \orig{U_2} \A \var{da} \A (\orig{\var{ext}_2} \A d\rho)) \A (\recomp{\var{ext}_2} \A \rho)  \A c_2~\IN\\
+          \quad (\var{db}, (c_1', c_2'))
+          \ee
+        & \text{otherwise}
+      \end{cases}               
+ \ee
+\ee\]
+Here, we only store the value of $x$ only if it is needed. We store an updated element instead of the original one, because the 
+$\rho$ part passed to a delta-translator is supposed to be used in derivatives, which are called after changes to environments has been reflected. 
+
+Also, we can avoid the issue of cache size by using the identity $C \x \UnitType = \UnitType \x C = C$. Addressing this is rather straightforward (e.g., we can use join list representations for $C$) 
+and thus the discussions about it are  omitted in this manuscript. 
+
+Notice that manipulation of uses introduces quite a few overhead. For example, $\var{mergeUses}$ takes time proportional to the size of uses, when uses are represented as lists or vectors. 
+Also, extraction (obtained by $\var{mergeUses}$) takes time proportional to sizes and uses. 
+Currently, we use staged computation to make this overhead will not happen in the incrementalized computation itself. 
 
 \subsection{Function-Like Objects}
+
+
 
 
 
