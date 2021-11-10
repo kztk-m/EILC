@@ -360,7 +360,8 @@ So, their implementation produces such functions in an on-demand fashion; this e
 This will not be a problem in their original framework, as they assumed an untyped system. 
 Though their proofs do not cover this treatment of function updates, we believe that this treatment cannot yield runtime type errors. 
 
-\subsection{Notes on Monoids}
+\subsection{Notes on Function Objects}
+\label{sec:notes-on-function-objects}
 \todo{This discussion should not be in Preliminaries}
 
 We are expecting that $(\Delta A, \oplus, \NilChange)$ forms a monoid, but this does not apply to function changes, because $\oplus$ always ignores derivative information. 
@@ -801,8 +802,21 @@ Currently, we use staged computation to make this overhead will not happen in th
 
 \subsection{Function-Like Objects}
 
-
-
+The discussions~\cite{sec:notes-on-function-objects} suggest that it is difficult (at least, far from straightforward) to have a function object (respecting types) 
+in CTS. So, here we expose some internal details to produce function-like objects (we say ``function-like'' as it contains a type parameter cannot determined only by $A$ and $B$). 
+Let us prepare the following types. 
+\begin{align*}
+  \con{Sem} \A E \A A &= \exists C. \exists \orig{U}. \exists \recomp{U}. 
+  (\Restrict{E}{\orig{U}} \to {A} \x C) \x 
+  (\Delta \Restrict{E}{\orig U} \to \Restrict{E}{\recomp U} \to C \to \Delta A \x C)\\
+  \con{Closure} \A E \A C \A A \A B &= E \x \con{Sem} \A (E \x A) \A B\\
+  \Delta(\con{Closure} \A E \A C \A A \A B) &= \Delta E
+\end{align*}
+Here, we assumed that we can lift the restriction operator to semantic level as $\Restrict{E}{U}$. 
+Now it is easy to have a function of the following signature. 
+\[
+\var{pseudoLam} :: \con{Sem} \A \sem{\Gamma, x : A} \A \sem{B} \to \exists E. \exists C. \con{Sem} \A \sem{\Gamma} \A (\con{Closure} \A E \A C \A A \A B)
+\] 
 
 
 \bibliographystyle{plainnat}
