@@ -321,12 +321,12 @@ the corresponding cache is lengths of inner sequences of type $\con{Seq} \A \con
 
 
 
-\subsection{Recovering Distributivity for Function Updates}
-
+\subsection{Recovering Distributivity for Function Changes}
+\label{sec:distributivity-and-function-changes}
 
 The accompanied implementation to \citet{GiarrussoRS19} also discusses 
 the distributivity issue, which itself is orthogonal to the cache-transfer style.
-The basic idea is to separate a function update to $f$ into a derivative of $f$ and a change to values of free variables in $f$, because 
+The basic idea is to separate a function change to $f$ into a derivative of $f$ and a change to values of free variables in $f$, because 
 the former one is distributive (in the sense of \ref{eq:dist-ilc} and \ref{eq:dist-cts}). 
 
 Let us use the original formalization to explain the idea. 
@@ -360,53 +360,55 @@ So, their implementation produces such functions in an on-demand fashion; this e
 This will not be a problem in their original framework, as they assumed an untyped system. 
 Though their proofs do not cover this treatment of function updates, we believe that this treatment cannot yield runtime type errors. 
 
-\subsection{Notes on Function Objects}
-\label{sec:notes-on-function-objects}
-\todo{This discussion should not be in Preliminaries}
+\newcommand{\FunObj}[2]{\con{Fun} \A #1 \A #2}
 
-We are expecting that $(\Delta A, \oplus, \NilChange)$ forms a monoid, but this does not apply to function changes, because $\oplus$ always ignores derivative information. 
-This may be caused by the fact that true function changes is only $A \to \Delta B$ and the derivative information is included just because of convenience to handle higher-order APIs (such as $\var{map}$).
+% \subsection{Notes on Function Objects}
+% \label{sec:notes-on-function-objects}
+% \todo{This discussion should not be in Preliminaries}
 
-% Considering only having $\lambda x.e$ and $e_1 \A e_2$, in category theory suggest that a function type and its corresponding $\Delta$-type is those that makes
-% the following two types isomorphic.
-In category theory, function types, \ie, internal hom-sets are characterized by the monoidal closedness. In our context, it says that 
-a function type and its corresponding $\Delta$-type is those that makes
-the following two types isomorphic. 
-\begin{itemize}
- \item 
-   \( (E \x A \to B ) \x ( E \x A \to \Delta E \x \Delta A \to \Delta B) \)
- \item 
-   \( 
-   (E \to \con{Fun} \A A \A B) \x (E \to \Delta E \to \Delta (\con{Fun} \A A \A B))
-   \) 
-\end{itemize}
-A clear solution is to take $\con{Fun} \A A \A B = A \to B$ and $\Delta (\con{Fun} \A A \A B) = A \to \Delta A \to \Delta B$.
-Another choice is to make to compute the effect of having $E$ as soon as possible to pass $\NilChange :: \Delta E$ to the derivative. 
-Then, $\con{Fun} \A A \A B = (A \to B) \x (A \to \Delta A \to \Delta B)$ and 
-$\Delta (\con{Fun} \A A \A B) = A \to \Delta B$. 
-However, the conversion from the bottom to the top, because for an ordinary function the $E \to \con{Fun} \A A \A B$ part must be called with $\rho$ but for 
-an derivative it must be called with $\rho \oplus d\rho$. 
+% We are expecting that $(\Delta A, \oplus, \NilChange)$ forms a monoid, but this does not apply to function changes, because $\oplus$ always ignores derivative information. 
+% This may be caused by the fact that true function changes is only $A \to \Delta B$ and the derivative information is included just because of convenience to handle higher-order APIs (such as $\var{map}$).
+
+% % Considering only having $\lambda x.e$ and $e_1 \A e_2$, in category theory suggest that a function type and its corresponding $\Delta$-type is those that makes
+% % the following two types isomorphic.
+% In category theory, function types, \ie, internal hom-sets are characterized by the monoidal closedness. In our context, it says that 
+% a function type and its corresponding $\Delta$-type is those that makes
+% the following two types isomorphic. 
+% \begin{itemize}
+%  \item 
+%    \( (E \x A \to B ) \x ( E \x A \to \Delta E \x \Delta A \to \Delta B) \)
+%  \item 
+%    \( 
+%    (E \to \FunObj{A}{B}) \x (E \to \Delta E \to \Delta (\FunObj{A}{B}))
+%    \) 
+% \end{itemize}
+% A clear solution is to take $\con{Fun} \A A \A B = A \to B$ and $\Delta (\FunObj{A}{B}) = A \to \Delta A \to \Delta B$.
+% Another choice is to make to compute the effect of having $E$ as soon as possible to pass $\NilChange :: \Delta E$ to the derivative. 
+% Then, $\con{Fun} \A A \A B = (A \to B) \x (A \to \Delta A \to \Delta B)$ and 
+% $\Delta (\con{Fun} \A A \A B) = A \to \Delta B$. 
+% However, the conversion from the bottom to the top, because for an ordinary function the $E \to \con{Fun} \A A \A B$ part must be called with $\rho$ but for 
+% an derivative it must be called with $\rho \oplus d\rho$. 
 
 
-For the cache transfer system, we instead consider an isomorphism between the following types. 
-\begin{itemize}
- \item 
-   \( (E \x A \to B \x C ) \x ( \Delta E \x \Delta A \to C \to \Delta B \x C) \)
- \item 
-   \( 
-      (E \to (\con{Fun} \A A \A B) \x C') \x (\Delta E \to C' \to \Delta (\con{Fun} \A A \A B) \x C')
-   \) 
-\end{itemize}
-This is actually harder than the previous one because of exposure of $C$; if we do not care about them, the solution corresponds to the above ``clear solution'' is 
-$\con{Fun} \A A \A B = A \to B \x C$ and $\Delta (\con{Fun} \A A \A B) = \Delta A \to C \to \Delta B \x C$. This is one of the reasons why \citet{GiarrussoRS19} considered an untyped system. 
-Similarly to the above discussion, we have a ``solution'' such that $\con{Fun} \A A \A B = (A \to B \x C) \x (\Delta A \to C \to \Delta B \x C)$, 
-$\Delta (\con{Fun} \A A \A B) = C \to \Delta B \x C$ and $C' = \UnitType$. 
-Ignoring the issue of exposure, there is no recomputation issue in the CTS, as the partially applied derivative is still valid as it does not depends on $E$ but $C$. 
-\todo{Is this really an isomorphism?}
-However, if we do not care about the exposure, another simple and effective solution exists: 
-$\con{Fun} \A A \A B = E \x (E \x A \to B \x C) \x ( \Delta E \x \Delta A \to C \to \Delta B \x C)$ and 
-$\Delta (\con{Fun} \A A \A B) = \Delta E$.
-\todo{Again, is this really a solution?}
+% For the cache transfer system, we instead consider an isomorphism between the following types. 
+% \begin{itemize}
+%  \item 
+%    \( (E \x A \to B \x C ) \x ( \Delta E \x \Delta A \to C \to \Delta B \x C) \)
+%  \item 
+%    \( 
+%       (E \to (\con{Fun} \A A \A B) \x C') \x (\Delta E \to C' \to \Delta (\con{Fun} \A A \A B) \x C')
+%    \) 
+% \end{itemize}
+% This is actually harder than the previous one because of exposure of $C$; if we do not care about them, the solution corresponds to the above ``clear solution'' is 
+% $\con{Fun} \A A \A B = A \to B \x C$ and $\Delta (\con{Fun} \A A \A B) = \Delta A \to C \to \Delta B \x C$. This is one of the reasons why \citet{GiarrussoRS19} considered an untyped system. 
+% Similarly to the above discussion, we have a ``solution'' such that $\con{Fun} \A A \A B = (A \to B \x C) \x (\Delta A \to C \to \Delta B \x C)$, 
+% $\Delta (\con{Fun} \A A \A B) = C \to \Delta B \x C$ and $C' = \UnitType$. 
+% Ignoring the issue of exposure, there is no recomputation issue in the CTS, as the partially applied derivative is still valid as it does not depends on $E$ but $C$. 
+% \todo{Is this really an isomorphism?}
+% However, if we do not care about the exposure, another simple and effective solution exists: 
+% $\con{Fun} \A A \A B = E \x (E \x A \to B \x C) \x ( \Delta E \x \Delta A \to C \to \Delta B \x C)$ and 
+% $\Delta (\con{Fun} \A A \A B) = \Delta E$.
+% \todo{Again, is this really a solution?}
 
 % A solution is to store the derivative information to the ordinary transformation part. That is, we define the semantics of type as:
 % \begin{align*}
@@ -702,6 +704,7 @@ We have the following observations from the behavior of $\var{mapSem}'$.
 
 
 \subsection{Cache-Size Reduction Especially for Recomputation}
+\label{sec:cache-size-optimized-version}
 
 \newcommand{\orig}[1]{#1^\mathrm{o}}
 \newcommand{\recomp}[1]{#1^\mathrm{r}}
@@ -731,6 +734,7 @@ When we combine the two computation, we need to merge uses, which is done by the
 \sem{ \Gamma \vdash x : A } = \UnitType, \{ x \}, \emptyset, (\lambda a. (a, \UnitValue)), (\lambda \var{da}.\lambda \dontcare.\lambda c.(\var{da}, c))
 \]
 Here, we abuse the notation to write a singleton environment as the element that it contains in the same way. 
+\todo{This representation is not good as it does not work well with function-like objects. We may need to say that $C$ contains information of $\sem{\Restrict{\Gamma}{\recomp U}}$.}
 
 For products and primitives, it suffices to redefine the corresponding semantic functions. 
 \begin{alignat*}{3}
@@ -802,21 +806,164 @@ Currently, we use staged computation to make this overhead will not happen in th
 
 \subsection{Function-Like Objects}
 
-The discussions~\cite{sec:notes-on-function-objects} suggest that it is difficult (at least, far from straightforward) to have a function object (respecting types) 
-in CTS. So, here we expose some internal details to produce function-like objects (we say ``function-like'' as it contains a type parameter cannot determined only by $A$ and $B$). 
-Let us prepare the following types. 
-\begin{align*}
-  \con{Sem} \A E \A A &= \exists C. \exists \orig{U}. \exists \recomp{U}. 
-  (\Restrict{E}{\orig{U}} \to {A} \x C) \x 
-  (\Delta \Restrict{E}{\orig U} \to \Restrict{E}{\recomp U} \to C \to \Delta A \x C)\\
-  \con{Closure} \A E \A C \A A \A B &= E \x \con{Sem} \A (E \x A) \A B\\
-  \Delta(\con{Closure} \A E \A C \A A \A B) &= \Delta E
-\end{align*}
-Here, we assumed that we can lift the restriction operator to semantic level as $\Restrict{E}{U}$. 
-Now it is easy to have a function of the following signature. 
+
+What is a function object? In category theory, it is characterized via monoidal closedness: that is, a function object (formally, an internal hom-set object) $\FunObj{A}{B}$ 
+in an object that establishes the following natural isomorphism. 
 \[
-\var{pseudoLam} :: \con{Sem} \A \sem{\Gamma, x : A} \A \sem{B} \to \exists E. \exists C. \con{Sem} \A \sem{\Gamma} \A (\con{Closure} \A E \A C \A A \A B)
+\mathcal{C} \A (E \x A) \A B \simeq \mathcal{C} \A E \A (\FunObj{A}{B})
+\]
+In addition to this, for our case, we need to ensure that $\Delta (\FunObj{A}{B})$ represents 
+changes, meaning that $\Delta (\FunObj{A}{B})$ must form a monoid and that there is some $(\oplus) : \FunObj{A}{B} \to \Delta (\FunObj{A}{B}) \to \FunObj{A}{B}$ that respect the monoid structure of $\Delta (\FunObj{A}{B})$. 
+
+In the original calculus by \citet{CaiGRO14}, where 
+\[
+\mathcal{C} \A E \A A = (E \to A) \x (E \to \Delta E \to \Delta A)
+\]
+a function object is to make the following types isomorphic. 
+\begin{itemize}
+ \item 
+   \( (E \x A \to B ) \x ( E \x A \to \Delta E \x \Delta A \to \Delta B) \)
+ \item 
+   \( 
+   (E \to \FunObj{A}{B}) \x (E \to \Delta E \to \Delta (\FunObj{A}{B}))
+   \) 
+\end{itemize}
+A clear solution is to take $\con{Fun} \A A \A B = A \to B$ and $\Delta (\con{Fun} \A A \A B) = A \to \Delta A \to \Delta B$. 
+This is good when we interpret $\lambda$ terms with first-order primitives, but has a practical limitation for handling 
+second-order primitives such as the $\var{map}$ API (Section~\ref{sec:distributivity-and-function-changes}), because $\Delta(\FunObj{A}{B})$ may not be a monoid.
+% language constructs with binders such as $\key{let}$, $\lambda$, and domain-specific APIs such the $\var{map}$ API for sequences. 
+
+
+So, we want to separate a function change into a change to the function itself and a derivative of the function. This idea is represented by a solution: 
+$\FunObj{A}{B} = (A \to B) \x (A \to \Delta A \to \Delta B)$ and $\Delta (\FunObj{A}{B}) = A \to \Delta B$.
+For this to be an answer, we need to leverage the property that $\mathcal{C} \A A \A B$ and $\FunObj{A}{B}$ consist of pairs of 
+a function and its derivative. 
+
+
+For the original CTS, where $\mathcal{C} \A A \A B = \exists C. (A \to B \x C) \x (\Delta A \to C \to \Delta B \x C)$, 
+a function object $\FunObj{A}{B}$ makes the following two types isomorphic. 
+\begin{itemize}
+ \item 
+   \( (E \x A \to B \x C ) \x ( \Delta E \x \Delta A \to C \to \Delta B \x C) \)
+ \item 
+   \( 
+      (E \to (\FunObj{A}{B}) \x C') \x (\Delta E \to C' \to \Delta (\FunObj{A}{B}) \x C')
+   \) 
+\end{itemize}
+Finding a solution for this case is actually harder than the previous one, because 
+$\FunObj{A}{B}$ cannot depend on other types than $A$ and $B$. 
+This is one of the reasons why \citet{GiarrussoRS19} considered an untyped system, 
+and we also doubt that there exists a meaningful solution. So, let us forget about the 
+restriction for now and allowing $\FunObj{A}{B}$ (and $\Delta (\FunObj{A}{B})$) to contain $C$.
+A corresponding solution to the above one is: 
+$\FunObj{A}{B} = (A \to B \x C) \x (\Delta A \to C \to \Delta B \x C)$, 
+$\Delta (\FunObj{A}{B}) = C \to \Delta B \x C$ and $C' = \UnitType$. 
+\todo{I don't know whether this actually defines isomorphism. Check it.}
+
+In \citet{GiarrussoRS19}, they consider closures and changes to them. So, they exposes $E$ as: $\FunObj{A}{B} = E \x (E \to A \to B \x C)$ and 
+$\Delta (\FunObj{A}{B}) = \Delta E \x (\Delta E \x \Delta A \to C \to \Delta B \x C)$.
+Similarly to the above discussion, to avoid the monoid issue, we also 
+have a solution in which $\FunObj{A}{B} =  E \x (E \to A \to B \x C) \x  (\Delta E \x \Delta A \to C \to \Delta B \x C)$ and $\Delta (\FunObj{A}{B}) = \Delta E$.
+Now we are able to hide $C$ but now need to expose $E$. Notice that this $E$ need not be the same as $E$ in the outside of $\FunObj{A}{B}$ ad $\Delta (\FunObj{A}{B})$.
+
+
+The above discussions suggest that we have a pseudo function object with functions, such as:
+\[
+\bb
+  \var{pLam}  &:: \mathcal{C} \A \sem{\Gamma, x : A} \A \sem{B} \to \exists C. \mathcal{C} \A \sem{\Gamma} \A (\con{Fun}_C \A A \A B) \\
+  \var{pApp}  &:: \mathcal{C} \A ((\con{Fun}_C \A A \A B) \x A) \A B \\
+%  \var{split} &:: (\con{Fun}_C \A A \A B) \x \Delta (\con{Fun}_C \A A \to B) \to 
+%    \exists C. (A \to B \x C) \x (C \to \Delta B \x C) \x (\Delta A \to C \to \Delta B \x C)
+\ee               
+\]
+For example, if we take the former representation (which exposes $C$), these functions can be implemented as below (again, we use an Agda-like syntax for handling existential quantifiers).
+\begin{code}
+\=L \var{pLam} :: \mathcal{C} \A (E \x A) \A B \to \exists C. \mathcal{C} \A E \A (\con{Fun}_C \A A \A B)\\
+\=L \var{pLam} \A (C, h, \var{dh}) = C,\, \UnitType,\, \lambda e.(h \A e, \lambda \var{da}. \var{dh} \A (\NilChange, \var{da})),\, \lambda \var{de}.\var{dh} \A (\var{de}, \NilChange)\\[\blanklineskip]%
+\=L \var{pApp} :: \mathcal{C} \A ((\con{Fun}_C \A A \A B) \x A) \A B\\
+\=L \var{pApp} = (\Delta A \to C \to \Delta B \x C) \x C ,\, h ,\, \var{dh} \\
+\=L \quad {} \WHERE~
+ \=W h \A ((f, \partial f), a) = \LET~(b,c) = f \A a~\IN~(b, (\partial f, c)) \\
+ \=W \var{dh} \A (\var{df}_0 , \var{da}) \A (\partial f, c) = {}
+      \=l \LET~(\var{db}_1, c') = \var{df}_0 \A c~\IN \\
+      \=l \LET~(\var{db}_2, c'') = \partial f \A \var{da} \A c'~\IN \\
+      \=l \quad (\var{db}_1 \oplus \var{db}_2, (\partial f, c'')) 
+\end{code}
+Now, we are ready to define the $\var{map}$ API via
+\[
+ \var{pMap} :: \forall C. \forall A. \forall B. \exists C'. \mathcal{C} \A (\con{Fun}_C \A A \A B) \A (\con{Fun}_{C'} \A (\con{Seq} \A A) \A (\con{Seq} \A B))
 \] 
+which makes us free from handling of environments ($\Gamma$).
+\todo{How can we define $\var{pMap}$ so that the implementations are common to both representations of $\FunObj{A}{B}$?}
+
+
+\todo{We have not checked the following discussions by an implementation.}
+Now, we discuss how this discussion applies to the cache optimized version in Section~\ref{sec:cache-size-optimized-version}.
+One thing to care here is how we abstract uses ($U$), which are syntactic notions and thus appeared inside the semantic brackets. Here, we simply assume that there 
+are objects $\Restrict{E}{U}$ corresponding to $\sem{\Restrict{\Gamma}{U}}$ where $E = \sem{\Gamma}$.
+So, in this case, we have 
+\[
+\mathcal{C} \A E \A A = \exists C. \exists \orig{U}. \exists \recomp{U}. 
+  (\Restrict{E}{\orig{U}} \to {A} \x C) \x 
+  (\Delta \Restrict{E}{\orig U} \to \Restrict{E}{\recomp U} \to C \to \Delta A \x C)
+\]
+and a corresponding function object must make the following types isomorphic. 
+\begin{itemize}
+ \item \(
+   \exists \orig{U}. \exists \recomp{U}. 
+   (\Restrict{(E \x A)}{\orig{U}} \to {B} \x C) \x 
+   (\Delta \Restrict{(E \x A)}{\orig U} \to \Restrict{(E \x A)}{\recomp U} \to C \to \Delta B \x C)
+   \) 
+ \item \(
+   \exists \orig{W}. \exists \recomp{W}. 
+   (\Restrict{E}{\orig{W}} \to \FunObj{A}{B} \x C') \x 
+   (\Delta \Restrict{E}{\orig W} \to \Restrict{E}{\recomp W} \to C' \to \Delta (\FunObj{A}{B}) \x C')
+   \)
+\end{itemize} 
+Again, we allow ourselves to expose $C$. 
+Considering meaning of uses, there is no room to chose $\orig{W}$ and $\recomp{W}$; they must be tails of $\orig{U}$ and $\recomp{U}$, respectively. This consideration suggests
+that exposing $C$ is not enough: $\FunObj{A}{B}$ and $\Delta (\FunObj{A}{B})$ must share the information of whether $A$ is used or not.  
+If we apply a similar discussion, we would have: 
+\begin{align*}
+\FunObj{A}{B} &= (\Restrict{A}{\orig{U_A}} \to B \x C) \x (\Restrict{\Delta A}{\orig{U_A}} \to \Restrict{E}{\recomp{W}} \to \Restrict{A}{\recomp{U_A}} \to C \to \Delta B \x C)\\
+\Delta (\FunObj{A}{B}) &= \Restrict{A}{\recomp{U_A}} \to C \to \Delta B \x C
+\end{align*}
+However, this is bad as $\Restrict{E}{\recomp{W}}$ part must be the same type as $\Restrict{E}{\recomp{W}}$ in the outside. 
+So, we take a closure approach: 
+\begin{align*}
+\FunObj{A}{B} &= \Restrict{E}{\orig{W}} \x    
+                (\Restrict{(E \x A)}{\orig{U}} \to {B} \x C) \x 
+                (\Delta \Restrict{(E \x A)}{\orig U} \to \Restrict{(E \x A)}{\recomp U} \to C \to \Delta B \x C)\\
+\Delta (\FunObj{A}{B}) &= \Delta (\Restrict{E}{\orig{W}}) 
+\end{align*}
+However, even with this approach, we cannot make use of the $\Restrict{(E \x A)}{\recomp U}$ part; recomputation is necessary as no one pass appropriate $\Restrict{E}{\recomp U}$.
+
+
+
+% The discussions in Section~\ref{sec:notes-on-function-objects} suggest that it is difficult (at least, far from straightforward) to have a function object (respecting types) 
+% in CTS. So, here we expose some internal details to produce function-like objects (we say ``function-like'' as it contains a type parameter cannot determined only by $A$ and $B$). 
+% Let us prepare the following types. 
+% \begin{align*}
+%   \con{Sem} \A E \A A &= \exists C. \exists \orig{U}. \exists \recomp{U}. 
+%   (\Restrict{E}{\orig{U}} \to {A} \x C) \x 
+%   (\Delta \Restrict{E}{\orig U} \to \Restrict{E}{\recomp U} \to C \to \Delta A \x C)\\
+%   \con{Closure} \A E \A C \A A \A B &= E \x \con{Sem} \A (E \x A) \A B\\
+%   \Delta(\con{Closure} \A E \A C \A A \A B) &= \Delta E
+% \end{align*}
+% Here, we assumed that we can lift the restriction operator to semantic level as $\Restrict{E}{U}$. 
+% % Now it is easy to have functions of the following signatures. 
+% Now it is easy to have a function of the following signature. 
+% \[
+% \bb 
+% \var{plam} &:: \con{Sem} \A \sem{\Gamma, x : A} \A \sem{B} \to \exists E. \exists C. \, \con{Sem} \A \sem{\Gamma} \A (\con{Closure} \A E \A C \A A \A B)\\
+% % \var{papp} &:: \forall E. \forall C.\, \con{Sem} \A \sem{\Gamma} \A (\con{Closure} \A E \A C \A A \A B) \to \con{Sem} \A \sem{\Gamma} \A \sem{A} \to \con{Sem} \A \sem{\Gamma} \A \sem{B}
+% \ee
+% \]
+% Accordingly, the $\var{map}$ API is implemented via: 
+% \[
+% \var{mapSem}'' : \forall E. \forall C. \, \con{Sem} \A \sem{\Gamma} \A (\con{Closure} \A E \A C \A A \A B) \to \sem{ \Gamma, y : \con{Seq} \A A \vdash \con{Seq} \A b }
+% \]
+
 
 
 \bibliographystyle{plainnat}
