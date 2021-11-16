@@ -940,6 +940,45 @@ However, even with this approach, we cannot make use of the $\Restrict{(E \x A)}
 
 
 
+
+It seems to me that the problem happens the semantic object expects $\Restrict{E}{\recomp U}$ passed from the context, but for functions a context in which a function is defined
+and a context in which a function is used can be different. 
+Then, consider the following variant that uses bidirectional transformations $\con{BX} \A S \A T$ to ensure that $S$ contains more information than $T$. 
+\[
+\mathcal{C} \A E \A A = \exists C. \exists \orig{U}. \exists \recomp{U}. 
+  \con{BX} \A C \A (\Restrict{E}{\recomp U}) \x 
+  (\Restrict{E}{\orig{U}} \to {A} \x C) \x 
+  (\Delta \Restrict{E}{\orig U} \to C \to \Delta A \x C)
+\]
+A corresponding function object must ensure the following types are isomorphic. 
+\begin{itemize}
+ \item \(
+   \exists \orig{U}. \exists \recomp{U}. 
+   \con{BX} \A C \A (\Restrict{(E \x A)}{\recomp U}) \x 
+   (\Restrict{(E \x A)}{\orig{U}} \to {B} \x C) \x 
+   (\Delta \Restrict{(E \x A)}{\orig U} \to C \to \Delta B \x C)
+   \) 
+ \item \(
+   \exists \orig{W}. \exists \recomp{W}. 
+   \con{BX} \A C' \A (\Restrict{E}{\recomp W}) \x 
+   (\Restrict{E}{\orig{W}} \to \FunObj{A}{B} \x C') \x 
+   (\Delta \Restrict{E}{\orig W}  \to C' \to \Delta (\FunObj{A}{B}) \x C')
+   \)
+\end{itemize} 
+So, if we follow the principle that $\FunObj{A}{B}$ should be $\mathcal{C} \A A \A B$ as the discussions so far, a candidate would be: 
+\begin{align*}
+\FunObj{A}{B} &= \con{BX} \A C \A (\Restrict{E}{\recomp{U_A}}) \x (\Restrict{A}{\orig{U_A}} \to B \x C) \x (\Restrict{\Delta A}{\orig{U_A}} \to \Restrict{A}{\recomp{U_A}} \to C \to \Delta B \x C)\\
+\Delta (\FunObj{A}{B}) &= C \to \Delta B \x C
+\end{align*}
+However, in this case, the construction of $C'$ is hard to achieve, as we can construct $C$ only by knowing both $E$ and $A$ (in general) and hard to obtain. 
+This issue itself would be addressed by using the fact that $\recomp U$ is no bigger than $\orig U$, and thus they comes with $\con{BX} \A (\Restrict{E}{\orig U}) \A (\Restrict{E}{\recomp U})$ for any $E$, which enables to take $C'$ as $\Restrict{E}{\recomp W}$. 
+Unfortunately, the performance issue remains, in function application that requires the bottom to up conversion, we cannot know the overlap in the information stored in $C$ and $C'$. 
+So, we need to make a product of caches. 
+
+
+
+
+
 % The discussions in Section~\ref{sec:notes-on-function-objects} suggest that it is difficult (at least, far from straightforward) to have a function object (respecting types) 
 % in CTS. So, here we expose some internal details to produce function-like objects (we say ``function-like'' as it contains a type parameter cannot determined only by $A$ and $B$). 
 % Let us prepare the following types. 
