@@ -228,7 +228,7 @@ so there is no problem on the treatment of function values.
 The tupled semantics, however, is almost useless, because it does not support a typical use case of incremental computation: 
 after an initial run, updates on the input can be translated to updates on the output, where we do not know what updates will come at
 the initial run. 
-The recomputation of the original values cannot be unavoidable in the tupled semantics.
+The recomputation of the original values is unavoidable in the tupled semantics.
 \kztk{Should we move the following?}
 Morihata \todo{his WPTE 2020 paper} addressed this issue by using Yoneda embedding\footnote{The original presentation does not mention Yoneda embedding. This explanation of his idea via Yoneda is our original.} to represent $\Delta A \to \Delta B$ as $(s \to \Delta A) \to s \to \Delta B$ where $s$ is abstract, 
 so that we can obtain $\sem{ \Gamma \vdash e : A }^\mathrm{t} \in \forall s.\, \sem{\Gamma} \x (s \to \Delta \sem{\Gamma}) \to \sem{A} \x (s \to \Delta \sem{A})$, where abstract $s$ is universally quantified. 
@@ -713,6 +713,8 @@ We have the following observations from the behavior of $\var{mapSem}'$.
 \newcommand{\orig}[1]{#1^\mathrm{o}}
 \newcommand{\recomp}[1]{#1^\mathrm{r}}
 \newcommand{\Restrict}[2]{#1|_{#2}}
+
+\todo{I think the storing environment is unnecessary for \var{map}, because we can compute an updated version by using function changes, without keeping updated environments.}
 
 Above, we have seen that we need to store entire $\sem{\Gamma}$ to implement the \var{map} API, which is costly and introduces redundancy in cache. For $\var{map} \A (\lambda x. \dots \var{map} \A (\dots) )$, it 
 will store both $\sem{\Gamma}$ and $\sem{\Gamma, x : A}$---whole $\sem{\Gamma}$ is copied. This space inefficiency is addressed by using the following ideas. 
