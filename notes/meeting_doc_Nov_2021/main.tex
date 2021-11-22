@@ -12,6 +12,8 @@
 \usepackage{alltt}
 \usepackage{calc}
 
+\usepackage{ulem} % for \sout 
+
 \usepackage[round,sort]{natbib}
 \let\cite=\citep
 
@@ -687,7 +689,8 @@ because it reduces the number of semantic objects to be handled from three to tw
 manipulation of caches and existential quantifiers. But, this impact gets bigger when we consider more complex semantic domain in later. 
 
 Then, let us focus on $\var{mapSem}'$ then. Here, the cache type for $\sem{ \Gamma, y : \con{Seq} \A a \vdash \con{Seq} \A b }$ 
-is $(\con{Seq} \A C) \x \sem{\Gamma}$, a sequence of individual caches and the original environment, where $C$ is the cache type for 
+is $(\con{Seq} \A C) \x \sem{\Gamma}$, a sequence of individual caches and the original environment (\kztk{I suspect we need the original environments}),
+ where $C$ is the cache type for 
 $\sem{ \Gamma, x : a \vdash - : b }$. Then, the initializer's behavior is rather straightforward: it receives $(\rho, \var{as})$,
 then defines $\init{h} = \lambda a.\init{f} \A (\rho,a)$ and maps $h$ to $\var{as}$ to produces the cache and the result. 
 The delta translator does a bit more interesting thing. Receiving $(d\rho, \var{das})$, 
@@ -695,13 +698,13 @@ it then generate from $\cts{f}$ two functions $\var{dh}_0 = \cts{f} \A (d\rho, \
 $\cts{h} \A \var{da} = \cts{f} \A (\NilChange, \var{da})$, a function change and a delta translator corresponding to $h$. 
 Then, it maps $\var{dh}_0$ to the sequence of individual caches to produce new cache sequence and updates to individual elements.
 After that, it processes updates $\Delta (\con{Seq} \A a)$, which is represented as a list of atomic updates one by one using $\cts{h}$. 
-Notice that we need to include $\sem{\Gamma}$ in the cache, because for insertions we need to call the original function, which requires $\rho :: \sem{\Gamma}$, to obtain the transformation results of inserted elements. 
+Notice that we need to include $\sem{\Gamma}$ in the cache, because for insertions we need to call the original function, which requires $\rho :: \sem{\Gamma}$, to obtain the transformation results of inserted elements. \kztk{Maybe, we do not need to store the original environment. Just using $\init{h}$ and $\var{dh}_0$ is OK.}
 
 We have the following observations from the behavior of $\var{mapSem}'$. 
 \begin{itemize}
  \item It essentially handles a function object and corresponding update ($\init{h} : \sem{A} \to \sem{B} \x C$, $\var{dh}_0 : C \to \Delta \sem{B} \x C$, $\cts{h} : \Delta \sem{A} \to C \to \Delta \sem{B} \x C$).
- \item Storing $\Gamma$ as a cache is costly in space; it will take quadratic space for nested $\var{map}$, as each $\var{map}$ stores 
-   an environment at the point. This is bad, as such caches contain a lot of overlaps. 
+ \item \sout{Storing $\Gamma$ as a cache is costly in space; it will take quadratic space for nested $\var{map}$, as each $\var{map}$ stores 
+   an environment at the point. This is bad, as such caches contain a lot of overlaps. } \kztk{See my comments above}
  \item How $\var{dh}$ will be used mirrors how $\init{h}$ is used. So, we may be able to share some patterns. 
  \item The treatment of $\cts{h}$ looks problem specific, and would be hard to share. 
 \end{itemize}
