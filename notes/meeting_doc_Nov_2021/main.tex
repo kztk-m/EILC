@@ -516,10 +516,14 @@ Then, what are function changes? Recall that a function $\con{Fun} \A A \A B$ an
  \item \( E \x A \to B \x (\Interact{(\Delta E \x \Delta A)}{\Delta B}) \)
  \item \( E \to (\con{Fun} \A A \A B) \x (\Interact{\Delta E}{\Delta (\con{Fun} \A A \A B)}) \)
 \end{itemize}
-If we were allowed exposure of $E$, the solution would exist, as: 
-$\con{Fun} \A A \A B = A \to B \x (\Interact{(\Delta E \x \Delta A)}{\Delta B})$
+One might think that we can separate $\Interact{(\Delta E \x \Delta A)}{\Delta B}$ into $\Interact{\Delta E}{\Delta B}$ and $\Interact{\Delta A}{\Delta B}$ to make a candidate of a solution 
+$\FunObj{A}{B} = A \to (B \x (\Interact{\Delta A}{\Delta B}))$ and 
+$\Delta (\FunObj{A}{B}) = \Delta B$. However, this is actually incorrect unless the changes to $\Delta E$ and $\Delta A$ are independent, meaning that translation results of $\Delta E$ does not affect the translation results of $\Delta A$. However, this is not true in general; one of such examples is \var{cartesian} discussed in \citet{GiarrussoRS19}. For $\var{cartesian} \A \var{xs} \A \var{ys}$, the translation results of insertions to $\var{ys}$ depends on $\var{xs}$, because inserted elements will be copied $(\var{length} \A \var{xs})$-times.
+
+If we were allowed to expose $E$, the solution would exist, as: 
+$\FunObj{A}{B} = A \to B \x (\Interact{(\Delta E \x \Delta A)}{\Delta B})$
 and 
-$\Delta (\con{Fun} \A A \A B) = \Delta E$. 
+$\Delta (\FunObj{A}{B}) = \Delta E$. 
 Considering this $\Delta E$ can only be used as an argument of $\var{interact} \A (i : \Interact{(\Delta E \x \Delta A)}{\Delta B})$ to produce $\Delta B$ and $i' : \Interact{(\Delta E \x \Delta A)}{\Delta B}$, 
 this ``solution'' is nothing but taking $C = \Interact{(\Delta E \x \Delta A)}{\Delta B}$. 
 
@@ -928,7 +932,9 @@ If we apply a similar discussion, we would have:
 \FunObj{A}{B} &= (\Restrict{A}{\orig{U_A}} \to B \x C) \x (\Restrict{\Delta A}{\orig{U_A}} \to \Restrict{E}{\recomp{W}} \to \Restrict{A}{\recomp{U_A}} \to C \to \Delta B \x C)\\
 \Delta (\FunObj{A}{B}) &= \Restrict{A}{\recomp{U_A}} \to C \to \Delta B \x C
 \end{align*}
-However, this is bad as $\Restrict{E}{\recomp{W}}$ part must be the same type as $\Restrict{E}{\recomp{W}}$ in the outside. 
+However, this is bad as $\Restrict{E}{\recomp{W}}$ part must be the same type as $\Restrict{E}{\recomp{W}}$ in the outside.\footnote{
+Of course, this is the issue of our handling of derivatives that couples a derivative with an original function. The original approach does not have this issue. 
+} 
 So, we take a closure approach: 
 \begin{align*}
 \FunObj{A}{B} &= \Restrict{E}{\orig{W}} \x    
