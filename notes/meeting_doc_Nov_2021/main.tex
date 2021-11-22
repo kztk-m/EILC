@@ -252,16 +252,17 @@ However, the functional representation means that the computation cannot be shar
 
 
 Another issue of the original ILC is that they cannot support separation of updates. It is rather common that updates $\var{da} : \Delta A$
-is represented by compositions of atomic updates $\var{da} = \var{da}_1 \oplus \dots \oplus \var{da}_n$.
+is represented by compositions of atomic updates $\var{da} = \var{da}_1 \ComposeU \dots \ComposeU \var{da}_n$, where compositions must satisfy 
+$a \oplus (\var{da}_1 \ComposeU \var{da}_2) = a \oplus \var{da}_1 \oplus \var{da}_2$.
 % \footnote{
 % Note that we can always find a composition operator by using Cayley representations. Let us write $\Delta_\mathrm{orig} A$ for 
 % the original delta type that only supports applications $(\oplus) : A \to \Delta_\mathrm{orig} \to A$. Then, we can (re)define $\Delta A$ as $A \to A$
 % where $a \oplus \var{da} = \var{da} \A a$, $\var{da}_1 \oplus \var{da}_2 = \var{da}_2 \circ \var{da}_1$, and the original delta $\var{da}_\mathrm{orig}$ is lifted as $\lambda x.(x \oplus \var{da}_\mathrm{orig})$.
 % } 
-(Here, we abuse the notation to use $\oplus$ both for composition and application.) 
+% (Here, we abuse the notation to use $\oplus$ both for composition and application.) 
 A derivative is then expected to handle such atomic updates one by one, meaning that the equation 
 \[
-\partial f \A a \A (\var{da}_1 \oplus \var{da}_2) = \partial f \A a \A \var{da}_1 \oplus \partial f \A (a \oplus \var{da}_1) \A \var{da}_2 \tag{\textsc{DistILC}}\label{eq:dist-ilc}
+\partial f \A a \A (\var{da}_1 \ComposeU \var{da}_2) = \partial f \A a \A \var{da}_1 \ComposeU \partial f \A (a \oplus \var{da}_1) \A \var{da}_2 \tag{\textsc{DistILC}}\label{eq:dist-ilc}
 \]
 is expected to hold. However, this equation does not always hold for function updates, as they may not be derivatives. The \var{map} API for sequences discussed in 
 \citet{GiarrussoRS19} is a good example in which this non-distribution becomes problematic. The API has type $(a \to b) \to \con{Seq} \A a \to \con{Seq} \A b$, 
@@ -287,12 +288,12 @@ The type above would be self-explanatory: we first build a cache together with t
 and then repeatedly translate updates on $A$ to ones on $B$ by using the second component. 
 Notice that the cache-transfer-style supports the translation of multiple updates as: 
 \begin{align*}
- \cts f \A (\var{da}_1 \oplus \var{da}_2) 
- & = (\oplus) \OpFMAP \cts f \A \var{da_1} \OpMULT \cts f \A \var{da}_2 \\
+ \cts f \A (\var{da}_1 \ComposeU \var{da}_2) 
+ & = (\ComposeU) \OpFMAP \cts f \A \var{da_1} \OpMULT \cts f \A \var{da}_2 \\
  & = \lambda c.\:
        \bbt \LET~(\var{db}_1,c_1) = \cts f \A \var{da}_1 \A c~\IN    \\
             \LET~(\var{db}_2,c_2) = \cts f \A \var{da}_2 \A c_1~\IN \\
-       \IN~(\var{db}_1 \oplus \var{db}_2, c_2) 
+       \IN~(\var{db}_1 \ComposeU \var{db}_2, c_2) 
        \ee
  \tag{\textsc{DistCTS}}\label{eq:dist-cts}
 \end{align*}
@@ -307,7 +308,7 @@ Cache is sometimes the original argument as the \var{div} function below.
 \=L \cts {\var{div}} :: \Delta (\mathbb{R} \x \mathbb{R}) \to \mathbb{R} \x \mathbb{R} \to \Delta (\mathbb{R} \x \mathbb{R}) \x \mathbb{R} \x \mathbb{R}\\
 \=L \cts {\var{div}} \A (\var{dx}, \var{dy}) \A (x,y) = (x + dx) / (y + dy) - x / y 
 \end{code}
-Here, we assumed $\Delta \mathbb{R} = \mathbb{R}$ with $a \oplus \var{da} = a + \var{da}$, and $\Delta (A \x B) = \Delta A \x \Delta B$. 
+Here, we assumed $\Delta \mathbb{R} = \mathbb{R}$ with $(\oplus) = (\ComposeU) = (+)$, and $\Delta (A \x B) = \Delta A \x \Delta B$. 
 (We used $\mathbb{R}$ as we do not focus on the precision issues.)
 Sometimes, it may be different from the original argument. For example, for $\var{concat} : \con{Seq} \A (\con{Seq} \A A) \to \con{Seq} \A A$, 
 the corresponding cache is lengths of inner sequences of type $\con{Seq} \A \con{Int}$. 
@@ -332,24 +333,24 @@ The basic idea is to separate a function change to $f$ into a derivative of $f$ 
 the former one is distributive (in the sense of \ref{eq:dist-ilc} and \ref{eq:dist-cts}). 
 
 Let us use the original formalization to explain the idea. 
-Suppose that $\var{df} : A \to \Delta A \to \Delta B$ is separated into $\var{df}_0 : A \to \Delta B$ and $\partial f : A \to \Delta A \to \Delta B$, where 
-$\partial f$ must be a derivative of the corresponding function, in a sense that $\var{df} \A a \A \var{da} = \var{df}_0 \A a \oplus \partial f \A a \A \var{da}$.
+Suppose that $\var{df} : A \to \Delta A \to \Delta B$ is separated into $\partial f : A \to \Delta A \to \Delta B$ and $\var{df}_0 : A \to \Delta B$, where 
+$\partial f$ must be a derivative of the corresponding function, in a sense that $\var{df} \A a \A \var{da} = \var{df}_0 \A a \ComposeU \partial f \A a \A \var{da}$.
 Then, the change to the function is defined accordingly by 
 \[
  f \oplus (\var{df}_0, \partial f) = \lambda x. f \A x \oplus \var{df}_0 \A x
 \]
 where $\partial f$ is not used at all as derivatives are nil changes. Now we have 
 \[
- \var{df} \A a \A (\var{da}_1 \oplus \var{da}_2) = \var{df}_0 \A a \oplus \partial f \A a \A \var{da}_1 \oplus \partial f \A (a \oplus \var{da}_1) \A \var{da}_2 
+ \var{df} \A a \A (\var{da}_1 \ComposeU \var{da}_2) = \var{df}_0 \A a \ComposeU \partial f \A a \A \var{da}_1 \ComposeU \partial f \A (a \oplus \var{da}_1) \A \var{da}_2 
 \]
 So that we can translate updates one by one. For example, consider the \var{map} case mentioned earlier. 
 Then, the translation result of $[\con{At} \A i \A \var{da}_i]$ is now:
 \[
-[ \con{At} \A 0 \A (\var{df}_0 \A a_0), \dots, \con{At} \A n \A (\var{df}_0 \A a_n) ] \oplus [\con{At} \A i \A (\partial f \A a_i \A \var{da}_i)]
+[ \con{At} \A 0 \A (\var{df}_0 \A a_0), \dots, \con{At} \A n \A (\var{df}_0 \A a_n) ] \ComposeU [\con{At} \A i \A (\partial f \A a_i \A \var{da}_i)]
 \]
 So, a sequence $[\con{At} \A {i_1} \A \var{da}_{i_1}, \con{At} \A {i_2} \A \var{da}_{i_2},\dots]$ of updates is translated to 
 \[
-[ \con{At} \A 0 \A (\var{df}_0 \A a_0), \dots, \con{At} \A n \A (\var{df}_0 \A a_n) ] \oplus [\con{At} \A i_1 \A (\partial f \A a^{(1)}_{i_i} \A \var{da}_{i_1}), \con{At} \A (\partial f \A a^{(2)}_{i_2} \A \var{da}_{i_2}), \dots]
+[ \con{At} \A 0 \A (\var{df}_0 \A a_0), \dots, \con{At} \A n \A (\var{df}_0 \A a_n) ] \ComposeU [\con{At} \A i_1 \A (\partial f \A a^{(1)}_{i_i} \A \var{da}_{i_1}), \con{At} \A (\partial f \A a^{(2)}_{i_2} \A \var{da}_{i_2}), \dots]
 \]
 where $a^j_i$ is the $i$th element of the sequence after $[\con{At} \A {i_1} \A \var{da}_{i_1}, \con{At} \A {i_2} \A \var{da}_{i_2},\dots, \con{At} \A {i_j} \A \var{da}_{i_j}]$ has been reflected. 
 
@@ -480,10 +481,10 @@ So, now we can write an incrementalized function between $A$ and $B$ as:
 Here, $\Interact{\Delta A}{\Delta B}$ will be called derivative if it respects the monoid structure, that is: 
 \begin{align*}
  \var{interact} \A i \A \NilChange &= (\NilChange, i) \\
- \var{interact} \A i \A (\var{da}_1 \oplus \var{da}_2) &= 
+ \var{interact} \A i \A (\var{da}_1 \ComposeU \var{da}_2) &= 
   \bbt \LET~(\var{db}_1,i_1) = \var{interact} \A i \A \var{da}_1~\IN\\
        \LET~(\var{db}_2,i_2) = \var{interact} \A i_1 \A \var{da}_2~\IN\\
-       \quad (\var{db}_1 \oplus \var{db}_2, i_2) 
+       \quad (\var{db}_1 \ComposeU \var{db}_2, i_2) 
   \ee  
 \end{align*}
 We may think that $i : \Interact{\Delta A}{\Delta B}$ as a cache, where the corresponding delta translator is $\var{interact}$ (the order of arguments differs though). 
@@ -579,7 +580,7 @@ where
 &\var{opSem}_\ms{op : A \to B} \A (C, \init{f}, \cts{f}) = C \x C_{\ms{op}} , \init{h}, \cts{h} \\
 & \quad \WHERE~
       \bbt
-        \init{h} \A \rho = \LET~\{(a, c) = \init{f} \A \rho; (b, c_{\ms{op}}) = \init{\ms{op}}\} \A a~\IN~ (b, (c, c_\ms{op})) \\
+        \init{h} \A \rho = \LET~\{(a, c) = \init{f} \A \rho; (b, c_{\ms{op}}) = \init{\ms{op}} \A a\}~\IN~ (b, (c, c_\ms{op})) \\
         \cts{h} \A d\rho \A (c,c_\ms{op}) = \LET~\{ (\var{da}, c') = \cts{f} \A d\rho \A c; (\var{db}, c'_\ms{op}) = \cts{\ms{op}} \A \var{da} \A c_\ms{op} \}~\IN~(\var{db}, (c', c'_\ms{op}))
       \ee 
 \end{alignat*}
@@ -620,8 +621,8 @@ we can define its instance as:
 \=L \key{instance} \A \con{CTSExp} \A \con{UnCTS}~\WHERE~\dots \COMMENT{omitted as straightforward adaptation of unembedding}\dots
 %\=L \quad \var{pair} \A e_1 \A e_2 = \con{UnCTS} \DOLLAR \lambda \gamma \to \var{pairSem} \A (\var{cts} \A e_1 \A \gamma) \A (\var{cts} \A e_2 \A \gamma)
 \end{code}
-Having HOAS (more precisely, the tagless final~\cite{CaKS09} here) interface not only relieve the syntactic pain of using de Bruijn indexed terms, 
-but also we can use Haskell functions to construct abstract syntax trees more effectively. 
+Having HOAS (more precisely, the tagless final~\cite{CaKS09} here) interface not only relieves the syntactic pain of using de Bruijn indexed terms, 
+but also enables us to use Haskell functions to construct abstract syntax trees more effectively. 
 The sharing operation $\var{share}$ plays an important role here; it enables us to distinguish the host-level sharing (that copies ASTs and duplicates computation) from 
 the guest-level explicit sharing (\ie, \key{let}).
 
@@ -896,7 +897,7 @@ For example, if we take the former representation (which exposes $C$), these fun
  \=W \var{dh} \A (\var{df}_0 , \var{da}) \A (\partial f, c) = {}
       \=l \LET~(\var{db}_1, c') = \var{df}_0 \A c~\IN \\
       \=l \LET~(\var{db}_2, c'') = \partial f \A \var{da} \A c'~\IN \\
-      \=l \quad (\var{db}_1 \oplus \var{db}_2, (\partial f, c'')) 
+      \=l \quad (\var{db}_1 \ComposeU \var{db}_2, (\partial f, c'')) 
 \end{code}
 Now, we are ready to define the $\var{map}$ API via
 \[
