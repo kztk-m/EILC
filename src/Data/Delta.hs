@@ -46,7 +46,7 @@ import           Data.Typeable         (Typeable)
 
 -- We generally assume that Delta a is a monoid
 data family Delta (a :: Type) :: Type
-class Semigroup (Delta a) => Diff a where
+class Monoid (Delta a) => Diff a where
   -- | Applying delta.
   -- prop> a /+ da /+ da' = a /+ (da <> da')
   (/+) :: a -> Delta a -> a
@@ -63,14 +63,17 @@ class Semigroup (Delta a) => Diff a where
   checkEmpty = foldrDelta (\_ _ -> False) True
   {-# INLINABLE checkEmpty #-}
 
-  -- Especially for functions, empty update is not unique and cannot be obtained of the air.
-  emptify :: Delta a -> Delta a
-  default emptify :: Monoid (Delta a) => Delta a -> Delta a
-  emptify = const mempty
+  -- -- Especially for functions, empty update is not unique and cannot be obtained of the air.
+  -- emptify :: Delta a -> Delta a
+  -- default emptify :: Monoid (Delta a) => Delta a -> Delta a
+  -- emptify = const mempty
 
-  emptyOf :: a -> Delta a
-  default emptyOf :: Monoid (Delta a) => a -> Delta a
-  emptyOf = const mempty
+  -- emptyOf :: a -> Delta a
+  -- default emptyOf :: Monoid (Delta a) => a -> Delta a
+  -- emptyOf = const mempty
+
+nilChangeOf :: Monoid (Delta a) => a -> Delta a
+nilChangeOf _ = mempty
 
 -- The following definitions are taken from Data.Foldable
 foldrDelta :: HasAtomicDelta a => (AtomicDelta a -> b -> b) -> b -> Delta a -> b
@@ -134,8 +137,8 @@ instance (Diff a, Diff b) => Diff (a, b) where
 
   checkEmpty (PairDelta da db) = checkEmpty da && checkEmpty db
 
-  emptify (PairDelta da db) = PairDelta (emptify da) (emptify db)
-  emptyOf (a, b) = PairDelta (emptyOf a) (emptyOf b)
+  -- emptify (PairDelta da db) = PairDelta (emptify da) (emptify db)
+  -- emptyOf (a, b) = PairDelta (emptyOf a) (emptyOf b)
 
 instance (Semigroup (Delta a), Semigroup (Delta b)) => Semigroup (Delta (a, b)) where
   PairDelta da1 db1 <> PairDelta da2 db2 = PairDelta (da1 <> da2) (db1 <> db2)
@@ -176,8 +179,8 @@ instance Diff a => Diff (Identity a) where
 
   checkEmpty (IdentityDelta da) = checkEmpty da
 
-  emptify = coerce (emptify :: Delta a -> Delta a)
-  emptyOf = coerce (emptyOf :: a -> Delta a)
+  -- emptify = coerce (emptify :: Delta a -> Delta a)
+  -- emptyOf = coerce (emptyOf :: a -> Delta a)
 
 instance HasAtomicDelta a => HasAtomicDelta (Identity a) where
   newtype instance AtomicDelta (Identity a) = ADIdentity { runADIdentity :: AtomicDelta a }

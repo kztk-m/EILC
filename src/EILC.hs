@@ -25,8 +25,7 @@ module EILC (
   module Data.Code,
   module Data.Delta,
   module Data.IFq,
-  module Data.IFqT,
-  module Data.IFqTE,
+  module Data.IFqT
   ) where
 
 import           Prelude    hiding (id, (.))
@@ -37,7 +36,7 @@ import           Data.Delta
 import           Data.IFq
 
 import           Data.IFqT
-import           Data.IFqTE
+
 
 
 

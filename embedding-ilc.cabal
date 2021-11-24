@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               embedding-ilc
-version:            0.1.0.0
+version:            0.2.0.0
 synopsis:
 
 -- A longer description of the package.
@@ -45,12 +45,14 @@ library
         Data.Interaction 
         Data.Incrementalized
         Data.Incrementalized.Function 
+        Data.JoinList 
         Data.IFq
         Data.IFqT 
-        Data.IFqTE 
-        Data.IFqTEU
+        -- Data.IFqTE 
+        -- Data.IFqTEU
         Data.IFFT  
         Language.Unembedding        
+        Language.Unembedding.PseudoFunction
         EILC
 
     -- Modules included in this library but not exported.

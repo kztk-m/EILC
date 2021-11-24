@@ -21,15 +21,15 @@ import           Data.Kind             (Type)
 import           Data.Typeable         (Typeable)
 import           Language.Unembedding  (Wit (Wit))
 
+import           Data.JoinList
 
-
-unCNE :: Conn f ('NE cs) -> NEConn f cs
+unCNE :: Conn f ('JLNonEmpty cs) -> NEConn f cs
 unCNE (CNE cs) = cs
 
-unCOne :: NEConn f ('NEOne c) -> f c
+unCOne :: NEConn f ('JLSingle c) -> f c
 unCOne (COne c) = c
 
-unCJoin :: NEConn f ('NEJoin c1 c2) -> (NEConn f c1, NEConn f c2)
+unCJoin :: NEConn f ('JLJoin c1 c2) -> (NEConn f c1, NEConn f c2)
 unCJoin (CJoin c1 c2) = (c1, c2)
 
 conn2code :: Conn PackedCode cs -> Code (Conn Identity cs)
@@ -51,13 +51,13 @@ code2conn' (CJoin pc1 pc2) c k =
   [|| let (c1, c2) = unCJoin $$c
       in $$(code2conn' pc1 [|| c1 ||] $ \c1' -> code2conn' pc2 [|| c2 ||] $ \c2' -> k (CJoin c1' c2')) ||]
 
-type family Func (cs :: Tree Type) (a :: Type) :: Type where
-  Func 'None a    = a
-  Func ('NE ne) a = Func' ne a
+type family Func (cs :: JoinList Type) (a :: Type) :: Type where
+  Func 'JLNil a    = a
+  Func ('JLNonEmpty ne) a = Func' ne a
 
-type family Func' (cs :: NETree Type) (a :: Type ) :: Type where
-  Func' ('NEOne c) a      = c -> a
-  Func' ('NEJoin c1 c2) a = Func' c1 (Func' c2 a)
+type family Func' (cs :: JoinListNE Type) (a :: Type ) :: Type where
+  Func' ('JLSingle c) a      = c -> a
+  Func' ('JLJoin c1 c2) a = Func' c1 (Func' c2 a)
 
 
 mkAbs :: forall cs a proxy. Conn proxy cs -> (Conn PackedCode cs -> Code a) -> Code (Func cs a)
@@ -86,12 +86,12 @@ mkApp' f (COne (PackedCode a)) = [|| $$f $$a ||]
 mkApp' f (CJoin c1 c2)         = mkApp' (mkApp' f c1) c2
 
 type family Flatten cs where
-  Flatten 'None   = '[]
-  Flatten ('NE x) = Flatten' x '[]
+  Flatten 'JLNil   = '[]
+  Flatten ('JLNonEmpty x) = Flatten' x '[]
 
 type family Flatten' cs r where
-  Flatten' ('NEOne c) r = c ': r
-  Flatten' ('NEJoin cs1 cs2) r = Flatten' cs1 (Flatten' cs2 r)
+  Flatten' ('JLSingle c) r = c ': r
+  Flatten' ('JLJoin cs1 cs2) r = Flatten' cs1 (Flatten' cs2 r)
 
 enilOfIdentity :: Env Identity '[]
 enilOfIdentity = ENil
@@ -125,12 +125,12 @@ cenv2conn' (CJoin p1 p2) env k =
 
 
 type family UnFlatten cs = c | c -> cs where
-  UnFlatten '[]       = 'None
-  UnFlatten (x ': xs) = 'NE (UnFlatten' x xs)
+  UnFlatten '[]       = 'JLNil
+  UnFlatten (x ': xs) = 'JLNonEmpty (UnFlatten' x xs)
 
 type family UnFlatten' c cs = r | r -> c cs where
-  UnFlatten' x '[]      = 'NEOne x
-  UnFlatten' x (y : ys) = 'NEJoin ('NEOne x) (UnFlatten' y ys)
+  UnFlatten' x '[]      = 'JLSingle x
+  UnFlatten' x (y : ys) = 'JLJoin ('JLSingle x) (UnFlatten' y ys)
 
 convertEnv :: Env f env -> Conn f (UnFlatten env)
 convertEnv ENil         = CNone

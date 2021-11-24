@@ -94,11 +94,13 @@ unfoldI seed0 step = go seed0
 
 
 instance IncrementalizedQ IFF where
+  type CodeType IFF a = Code a
+
   fromStateless f df = IFF $ \a -> do
     b <- mkLet $ f a
     return (b, [|| staticInteraction (\da -> $$(df [|| da ||])) ||])
 
-  fromFunctions f df = IFF $ \a -> do
+  fromFunctions _ f df = IFF $ \a -> do
     (b, c) <- CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], [|| c ||])) ||]
     return (b, [|| unfoldI $$c $$df ||] )
 

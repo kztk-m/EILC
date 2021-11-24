@@ -10,76 +10,29 @@ import           Data.Code        (Code)
 import           Data.Delta       (AtomicDelta, Delta, Diff (..),
                                    HasAtomicDelta (..), iterTr, iterTrStateless)
 import           Data.Interaction (Interaction)
+import           Data.Kind        (Type)
 import           Data.Typeable    (Typeable)
 
 class IncrementalizedQ cat where
-  {-# MINIMAL (fromStateless|fromStatelessAtomic), (fromFunctions|fromFunctionsAtomic), compile #-}
+  {-# MINIMAL fromStateless, fromFunctions, compile #-}
+  type CodeType cat a :: Type
 
   fromStateless ::
-    (Code a  -> Code b)
-    -> (Code (Delta a) -> Code (Delta b))
+    (CodeType cat a  -> CodeType cat b)
+    -> (CodeType cat (Delta a) -> CodeType cat (Delta b))
     -> cat a b
-
-  default
-    fromStateless ::
-      (HasAtomicDelta a, Monoid (Delta b))
-      => (Code a  -> Code b)
-      -> (Code (Delta a) -> Code (Delta b))
-      -> cat a b
-  fromStateless f df =
-    fromStatelessAtomic f (\ada -> [|| let da = injDelta $$ada in $$(df [|| da ||]) ||])
-
-  fromStatelessAtomic ::
-    (HasAtomicDelta a, Monoid (Delta b))
-    => (Code a  -> Code b)
-    -> (Code (AtomicDelta a) -> Code (Delta b))
-    -> cat a b
-  fromStatelessAtomic f df =
-    fromStateless f (\da -> [|| iterTrStateless (\da' -> $$(df [|| da' ||])) $$da ||])
-
-  fromD ::
-    (Typeable a, Diff a) =>
-    (Code a  -> Code b)
-    -> (Code a -> Code (Delta a) -> Code (Delta b))
-    -> cat a b
-  fromD f df = -- fromDAtomic f (\a ada -> [|| let da = pure $$ada in $$(df a [|| da ||]) ||])
-    fromFunctions
-       [|| \a -> ($$(f [|| a ||]), a) ||]
-       [|| \da a -> let db = $$(df [|| a ||] [|| da ||]) in (db, a /+ da) ||]
-  fromDAtomic ::
-    (Typeable a, HasAtomicDelta a, Monoid (Delta b)) =>
-    (Code a  -> Code b)
-    -> (Code a -> Code (AtomicDelta a) -> Code (Delta b))
-    -> cat a b
-  fromDAtomic f df =
-    fromFunctionsAtomic
-       [|| \a -> ($$(f [|| a ||]), a) ||]
-       [|| \da a -> let db = $$(df [|| a ||] [|| da ||]) in (db, applyAtomicDelta a da) ||]
 
   fromFunctions ::
     Typeable c
-    => Code (a -> (b , c))
-    -> Code (Delta a -> c -> (Delta b, c))
+    => proxy c
+    -> CodeType cat (a -> (b , c))
+    -> CodeType cat (Delta a -> c -> (Delta b, c))
     -> cat a b
-  default
-    fromFunctions ::
-      (Typeable c, HasAtomicDelta a, Monoid (Delta b))
-      => Code (a -> (b , c))
-      -> Code (Delta a -> c -> (Delta b, c))
-      -> cat a b
-  fromFunctions f df =
-    fromFunctionsAtomic f [|| $$df . injDelta ||]
-
-  fromFunctionsAtomic ::
-    (Typeable c, HasAtomicDelta a, Monoid (Delta b))
-    => Code (a -> (b , c))
-    -> Code (AtomicDelta a -> c -> (Delta b, c))
-    -> cat a b
-  fromFunctionsAtomic f df =
-    fromFunctions f [|| iterTr $$df ||]
 
   compile ::
-    cat a b -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
+    cat a b -> CodeType cat (a -> (b, Interaction (Delta a) (Delta b) ))
+
+
 
 
 
