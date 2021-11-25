@@ -1,4 +1,6 @@
 .stack-work
+.vscode
+.dir-locals.el
 /dist-newstyle
 stack.yaml.lock
 *.prof

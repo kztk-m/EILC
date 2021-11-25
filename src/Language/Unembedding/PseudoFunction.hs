@@ -19,17 +19,18 @@ import           Data.Env
 
 data ExTerm cat term as a b = forall c. ExTerm (term as (PFun cat c a b))
 
+data family PFun (cat :: k -> k -> Type) (c :: k) :: k -> k -> k
+
 class Term cat term => PFunTerm cat (term :: [k] -> k -> Type) where
-  data PFun cat c :: k -> k -> k
-  type KK cat c :: Constraint
+  type KK cat :: k -> Constraint
 
   pAbsTerm ::
     (AllIn as (K cat), K cat a, K cat b) =>
-    term (a ': as) b -> (forall c. KK cat c => term as (PFun cat c a b) -> r) -> r
+    term (a ': as) b -> (forall c. (KK cat c, K cat (PFun cat c a b)) => term as (PFun cat c a b) -> r) -> r
     -- ExTerm cat term as a b
 
   pAppTerm ::
-    (AllIn as (K cat), K cat a, K cat b, KK cat c) =>
+    (AllIn as (K cat), K cat a, K cat b, K cat (PFun cat c a b), KK cat c) =>
     term as (PFun cat c a b) -> term as a -> term as b
 
 {-

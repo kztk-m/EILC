@@ -2,6 +2,12 @@
 {-# LANGUAGE GADTs                     #-}
 {-# LANGUAGE MultiParamTypeClasses     #-}
 {-# LANGUAGE TemplateHaskell           #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Data.IFqT where
 
@@ -10,12 +16,12 @@ import           Data.Code            (Code, CodeC, PackedCode,
                                        PackedCodeDiff (..), mkLet)
 import           Data.Delta           (Delta, pairDelta)
 import           Data.Env             (Env (..))
-
 import           Data.Conn            (Conn (..), decompConn, isNone, joinConn)
 import           Data.IFq             (IFqS (..), convTEnv)
 
 import           Data.Code.Lifting    (WitTypeable (WitTypeable))
 import           Language.Unembedding (LetTerm (..), Term (..))
+
 
 
 data IFqT as b =

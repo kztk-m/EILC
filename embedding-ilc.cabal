@@ -48,6 +48,7 @@ library
         Data.JoinList 
         Data.IFq
         Data.IFqT 
+        Data.IFqTU
         -- Data.IFqTE 
         -- Data.IFqTEU
         Data.IFFT  
