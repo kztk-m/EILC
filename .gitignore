@@ -9,5 +9,5 @@ stack.yaml.lock
 *.profiterole.html 
 *.profiterole.txt 
 
-*.html 
-*.svg 
+/*.html 
+/*.svg 
