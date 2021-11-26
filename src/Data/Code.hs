@@ -15,6 +15,18 @@ type Code a = TH.Q (TH.TExp a)
 
 newtype CodeC a = CodeC { runCodeC :: forall r. (a -> Code r) -> Code r }
 
+isSimple :: Code a -> CodeC Bool
+isSimple m = CodeC $ \k -> do
+  e <- TH.unType <$> m
+  k (isSimpleExp e)
+  where
+    isSimpleExp :: TH.Exp -> Bool
+    isSimpleExp (TH.VarE _)    = True
+    isSimpleExp (TH.ConE _)    = True
+    isSimpleExp (TH.ParensE e) = isSimpleExp e
+    isSimpleExp (TH.LitE _)    = True
+    isSimpleExp _              = False
+
 toCode :: CodeC (Code a) -> Code a
 toCode (CodeC m) = m id
 
@@ -30,16 +42,24 @@ instance Monad CodeC where
   m >>= f = CodeC $ \k -> runCodeC m $ \a -> runCodeC (f a) k
 
 mkLet :: Code a -> CodeC (Code a)
-mkLet e = CodeC $ \k ->
-  -- Used _v to avoid "unused ..." errors.
-  [|| let !_v = $$( e ) in $$(k [|| _v ||]) ||]
+mkLet e = do
+  b <- isSimple e
+  if b
+    then
+    -- suppress inserting "let" if an expression is enough simple
+    return e
+    else
+    CodeC $ \k ->
+    -- Used _v to avoid "unused ..." errors.
+    [|| let !_v = $$( e ) in $$(k [|| _v ||]) ||]
 
 -- | A 'mkLet' variant that does not generalize types.
 shareNonGen :: Code a -> CodeC (Code a)
 shareNonGen e = CodeC $ \k ->
   [|| $$e & (\ !_v -> $$(k [|| _v ||]))||]
 
-newtype PackedCode a = PackedCode { getCode :: Code a }
+-- | Newtype Wrapper for 'Code'
+newtype PackedCode a = PackedCode { unPackCode :: Code a }
 
 data PackedCodeDelta a where
   PackedCodeDelta :: Diff a => Code (Delta a) -> PackedCodeDelta a
