@@ -30,7 +30,9 @@ module Language.Unembedding (
   PackTermF(..), PackFun(..), PackFunArg(..), ToEnvProxy(..),
   liftSO0, liftSO1, liftSO2, liftSO3,
 
-  App2(..), TSem(..),
+  App2(..),
+
+  TSem(..), diffT,
 
   run, runMono, runWith, runMonoWith,
 

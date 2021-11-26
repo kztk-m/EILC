@@ -56,7 +56,9 @@ import           Data.IFqTU                          (Extr, IFqTU (..),
                                                       SBool (..), SafeTail,
                                                       extendEnv, extractEnv,
                                                       safeTail, witExtr)
-import           Data.Incrementalized                (fromStatelessIdentity)
+import           Data.Incrementalized                (IncrementalizedQ (CodeType),
+                                                      fromStatelessCode,
+                                                      fromStatelessIdentity)
 import           Data.JoinList
 
 {-
@@ -82,13 +84,6 @@ data FunCache c a b = FunCache !(a -> (b, c)) !(Delta a -> c -> (Delta b, c))
 data instance (Delta (FunCache c a b)) =
   DeltaFunCache !Bool !(c -> (Delta b, c))
 
-newtype instance PFun IFqS c a b = PFunIFqS (FunCache c a b)
-  deriving Diff
-newtype instance Delta (PFun IFqS c a b) = DeltaPFunIFqS (Delta (FunCache c a b))
-
-deriving instance Semigroup (Delta b) => Semigroup (Delta (PFun IFqS c a b))
-deriving instance Monoid (Delta b) => Monoid (Delta (PFun IFqS c a b))
-
 -- data instance Delta (PFun IFqS c a b) = DeltaPFun !Bool !(c -> (Delta b, c))
 
 instance Semigroup (Delta b) => Semigroup (Delta (FunCache c a b)) where
@@ -113,6 +108,12 @@ instance Diff b => Diff (FunCache c a b) where
 
 
 type ConnSingle f t = Conn f ('JLNonEmpty ('JLSingle t))
+
+
+newtype instance Delta (PFun IFqS c a b) = DeltaPFunIFqS (Delta (FunCache c a b))
+
+deriving instance Semigroup (Delta b) => Semigroup (Delta (PFun IFqS c a b))
+deriving instance Monoid (Delta b) => Monoid (Delta (PFun IFqS c a b))
 
 
 pAppImpl ::
@@ -182,8 +183,6 @@ asType :: a -> a -> a
 asType a _ = a
 
 instance PFunTerm IFqS IFqT where
-  type KK IFqS = Typeable
-
   pAbsTerm (IFqT (ECons _ tenv) (sh :: Conn WitTypeable cs) m) kk = case wit of
     Wit -> kk $ IFqT tenv CNone $ do
         (f, tr) <- m
@@ -264,9 +263,12 @@ pAppImplU tenv = IFqTU (ECons WitTypeable (ECons WitTypeable tenv)) sh (ECons ST
   where
     sh = CSingle WitTypeable
 
+instance HasPFun IFqS where
+  type KK IFqS = Typeable
+  newtype PFun IFqS c a b = PFunIFqS (FunCache c a b)
+    deriving Diff
 
 instance PFunTerm IFqS IFqTU where
-  type KK IFqS = Typeable
 
   pAbsTerm (IFqTU (ECons _ (tenv :: Env WitTypeable as)) (sh :: Conn WitTypeable cs) (u :: Env SBool us) m) kk = case (wit, wit2) of
     (Wit, Wit) -> kk $ IFqTU tenv CNone u' $ do
@@ -316,17 +318,18 @@ instance PFunTerm IFqS IFqTU where
     letTerm t2 $ letTerm (weakenTerm t1) $ pAppImplU tenv
 
 
-newtype instance PFun IF c a b = PFunIF (FunCache c a b)
-  deriving Diff
 
 newtype instance Delta (PFun IF c a b) = DeltaPFunIF (Delta (FunCache c a b))
 
 deriving instance Semigroup (Delta b) => Semigroup (Delta (PFun IF c a b))
 deriving instance Monoid (Delta b) => Monoid (Delta (PFun IF c a b))
 
-instance PFunTerm IF IFT where
+instance HasPFun IF where
   type KK IF = Typeable
+  newtype PFun IF c a b = PFunIF (FunCache c a b)
+    deriving Diff
 
+instance PFunTerm IF IFT where
   pAbsTerm (IFT (IF (f :: Env PackedDiff (a ': as) -> (b, c)) tr)) k = k $ IFT $ IF f' tr'
     where
       f' :: Env PackedDiff as -> (PFun IF c a b, ())
@@ -456,11 +459,16 @@ instance FunTerm IF IFT where
   lamTerm t = pAbsTerm t (mapTerm toDynIF)
   appTerm e1 e2 = pAppTerm e1 e2
 
+-- problematic ::
+--   (K cat a, K cat (IHom cat a a), FunTerm cat term, App2 cat term e,
+--    IncrementalizedQ cat, Enum a,
+--    CodeType cat ~ PackedCode) =>
+--   e a -> e a
 -- problematic x0 =
 --   -- (lam (\f -> lam $ \x -> f `app` (f `app` x)) `app` lam (\f -> lam $ \x -> f `app` (f `app` x))) `app` lam (lift incC) `app` x0
 --   lam (\f -> lam $ \x -> f `app` (f `app` x)) `app` lam (lift incC) `app` x0
 --   where
---     incC = fromStateless (\x -> [|| succ $$x ||]) Prelude.id
+--     incC = fromStatelessCode (\x -> [|| succ $$x ||]) id
 
 {-
 let h = $$( compile $ (runMonoWith (Proxy :: Proxy IFqT) problematic :: IFqS Int Int))

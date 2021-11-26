@@ -301,9 +301,9 @@ class MapAPI cat term | term -> cat where
 
 
 fromPF ::
-  forall cat term s a b f .
-  (LetTerm cat term, PFunTerm cat term, K cat ~ DiffTypeable, KK cat ~ Typeable,
-   forall c. Diff (PFun cat (f c) (S a) (S b)),
+  forall cat term s (a :: Type) (b :: Type) f .
+  (LetTerm cat term, PFunTerm cat term, K cat ~ DiffTypeable, KK cat ~ Typeable, HasPFun cat,
+   forall (c :: Type). Diff (PFun cat (f c) (S a) (S b)),
    Typeable cat, Typeable f, AllIn s DiffTypeable, DiffTypeable a, DiffTypeable b
   ) =>
   -- Skolem function f is used to represent existential quantification in this scope.
