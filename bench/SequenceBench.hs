@@ -22,6 +22,7 @@ import           Data.List         (foldl')
 import           Data.IFqT         (IFqT)
 import           Data.IFqTU        (IFqTU)
 
+import           Data.IF           (IFT)
 import           Data.Proxy        (Proxy (..))
 
 sequence1 :: S Int
@@ -86,11 +87,12 @@ tryScratch h = go (fst . h)
 
 
 
-dCartesianT, dCartesianTHO, dCartesianTU :: (S Int, S Int) -> (S (Int, Int), Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int))))
+dCartesianT, dCartesianTHO, dCartesianTU, dCartesianRaw :: (S Int, S Int) -> (S (Int, Int), Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int))))
 
 dCartesianT   = $$( testCode (Proxy :: Proxy IFqT) )
 dCartesianTHO = $$( testCodeHO (Proxy :: Proxy IFqT) )
 dCartesianTU  = $$( testCodeHO (Proxy :: Proxy IFqTU) )
+dCartesianRaw = testCodeHORaw (Proxy :: Proxy IFT)
 -- dCartesianTE  = $$( testCode (Proxy :: Proxy IFqTE ) )
 -- dCartesianTEUS = $$( testCode (Proxy :: Proxy IFqTEUS ) )
 -- dCartesianF   = $$( testCode (Proxy :: Proxy IFFT ) )
@@ -104,10 +106,11 @@ doBench :: String -> (S Int, S Int) -> [Delta (S Int, S Int)] -> Benchmark
 doBench gname a0 ds =
   env (return (a0, ds)) $ \ ~(a0', ds') ->
     bgroup gname [
-      bench "S"     $ nf (tryScratch dCartesianT a0') ds',
-      bench "T"     $ nf (tryInc dCartesianT a0') ds' ,
-      bench "THO"   $ nf (tryInc dCartesianTHO a0') ds',
-      bench "TU"    $ nf (tryInc dCartesianTU  a0') ds'
+      bench "Scratch" $ nf (tryScratch dCartesianT a0') ds',
+      bench "T"       $ nf (tryInc dCartesianT a0') ds' ,
+      bench "THO"     $ nf (tryInc dCartesianTHO a0') ds',
+      bench "THO-Opt" $ nf (tryInc dCartesianTU  a0') ds',
+      bench "Raw"     $ nf (tryInc dCartesianRaw a0') ds'
     ]
 
 
@@ -119,5 +122,7 @@ main = defaultMain [
     doBench "200-1-0" (mkInitSequences 200) (insOuter 1),
     doBench "200-0-1" (mkInitSequences 200) (insInner 1),
     doBench "200-10-0" (mkInitSequences 200) (insOuter 10),
-    doBench "200-0-10" (mkInitSequences 200) (insInner 10)
+    doBench "200-0-10" (mkInitSequences 200) (insInner 10),
+    doBench "200-20-0" (mkInitSequences 200) (insOuter 20),
+    doBench "200-0-20" (mkInitSequences 200) (insInner 20)
   ]

@@ -69,13 +69,13 @@ fromStatelessIdentity ::
   -> cat a b
 fromStatelessIdentity = coerce (fromStateless :: (Identity a -> Identity b) -> (Identity (Delta a) -> Identity (Delta b)) -> cat a b)
 
-fromFunctionIdentity ::
+fromFunctionsIdentity ::
   forall cat a b c.
   (IncrementalizedQ cat, CodeType cat ~ Identity, Typeable c)
   => (a -> (b, c))
   -> (Delta a -> c -> (Delta b, c))
   -> cat a b
-fromFunctionIdentity =
+fromFunctionsIdentity =
   coerce (fromFunctions Proxy :: Identity (a -> (b, c)) -> Identity (Delta a -> c -> (Delta b, c)) -> cat a b)
 
 compileIdentity ::

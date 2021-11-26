@@ -1,23 +1,27 @@
-{-# LANGUAGE DataKinds             #-}
-{-# LANGUAGE FlexibleContexts      #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE GADTs                 #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE RankNTypes            #-}
-{-# LANGUAGE ScopedTypeVariables   #-}
-{-# LANGUAGE TemplateHaskell       #-}
-{-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE TypeOperators         #-}
+{-# LANGUAGE BangPatterns               #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE InstanceSigs               #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeOperators              #-}
+
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE BangPatterns          #-}
-{-# LANGUAGE InstanceSigs          #-}
+{-# LANGUAGE StandaloneDeriving         #-}
 
 module Data.Incrementalized.Function (
     toDynI, fromDynI, -- trDFunT,
     -- FunT(..), type Delta (..), IsEmpty(..),
+    toDynFunCache, toDynDeltaFunCache,
+    toDynPFunIFqS, toDynDeltaPFunIFqS,
     ensureSameType,
-    PFun(..), type Delta (..), FunD
-  ,PFunI) where
+    PFun(..), type Delta (..), FunCache(..)) where
 
 import           Data.Dynamic                        (Dynamic, fromDynamic,
                                                       toDyn)
@@ -25,8 +29,10 @@ import           Data.Functor.Identity               (Identity (..))
 import           Data.Maybe                          (fromJust)
 import           Data.Typeable                       (Proxy (..), Typeable)
 
+import           Prelude                             hiding (id, (.))
 
 import           Control.Arrow                       (Arrow (second))
+
 
 import           Data.Code
 import           Data.Code.Lifting
@@ -36,6 +42,7 @@ import           Data.Delta                          (Delta (PairDelta),
                                                       nilChangeOf)
 import           Data.Env                            (AllIn, Env (..), mapEnv)
 
+import           Data.IF
 import           Data.IFq                            (IFqS (..))
 import           Data.IFqT                           (IFqT (..))
 
@@ -43,25 +50,25 @@ import           Data.IFqT                           (IFqT (..))
 import           Language.Unembedding                hiding (Fun)
 import           Language.Unembedding.PseudoFunction
 
-import           Data.Function
+import           Data.Coerce                         (coerce)
+import           Data.Function                       ((&))
 import           Data.IFqTU                          (Extr, IFqTU (..),
                                                       SBool (..), SafeTail,
                                                       extendEnv, extractEnv,
                                                       safeTail, witExtr)
+import           Data.Incrementalized                (fromStatelessIdentity)
 import           Data.JoinList
 
 {-
 See ./note/meeting_doc_Nov_2021.
 -}
 
-type PFunI = PFun IFqS
-type FunD  = PFun IFqS Dynamic
 
 toDynI :: Typeable cs => Env Identity cs -> Dynamic
 toDynI = toDyn
 
 fromDynI :: Typeable cs => Dynamic -> Env Identity cs
-fromDynI = fromJust Prelude.. fromDynamic
+fromDynI = fromJust . fromDynamic
 
 allEmptyDelta :: forall xs. Env PackedCodeDelta xs -> Code Bool
 allEmptyDelta ENil = [|| True ||]
@@ -71,27 +78,38 @@ allEmptyDelta (ECons (PackedCodeDelta da) das)  = [|| checkEmpty $$da && $$(allE
 ensureSameType :: a -> a -> ()
 ensureSameType _ _ = ()
 
-data instance Delta (PFun IFqS c a b) = DeltaPFun !Bool !(c -> (Delta b, c))
+data FunCache c a b = FunCache !(a -> (b, c)) !(Delta a -> c -> (Delta b, c))
+data instance (Delta (FunCache c a b)) =
+  DeltaFunCache !Bool !(c -> (Delta b, c))
 
-instance Semigroup (Delta b) => Semigroup (Delta (PFun IFqS c a b)) where
-  DeltaPFun b1 df1 <> DeltaPFun b2 df2 = DeltaPFun (b1 && b2) $ \c ->
+newtype instance PFun IFqS c a b = PFunIFqS (FunCache c a b)
+  deriving Diff
+newtype instance Delta (PFun IFqS c a b) = DeltaPFunIFqS (Delta (FunCache c a b))
+
+deriving instance Semigroup (Delta b) => Semigroup (Delta (PFun IFqS c a b))
+deriving instance Monoid (Delta b) => Monoid (Delta (PFun IFqS c a b))
+
+-- data instance Delta (PFun IFqS c a b) = DeltaPFun !Bool !(c -> (Delta b, c))
+
+instance Semigroup (Delta b) => Semigroup (Delta (FunCache c a b)) where
+  DeltaFunCache b1 df1 <> DeltaFunCache b2 df2 = DeltaFunCache (b1 && b2) $ \c ->
     let (!db1, !c1) = df1 c
         (!db2, !c2) = df2 c1
     in (db1 <> db2, c2)
 
-instance Monoid (Delta b) => Monoid (Delta (PFun IFqS c a b)) where
-  mempty = DeltaPFun True $ \c -> (mempty, c)
+instance Monoid (Delta b) => Monoid (Delta (FunCache c a b)) where
+  mempty = DeltaFunCache True $ \c -> (mempty, c)
 
-instance Diff b => Diff (PFun IFqS c a b) where
-  f /+ DeltaPFun True _ = f
-  PFun f derive_f /+ DeltaPFun _ df = PFun f' derive_f
+instance Diff b => Diff (FunCache c a b) where
+  f /+ DeltaFunCache True _ = f
+  FunCache f derive_f /+ DeltaFunCache _ df = FunCache f' derive_f
     where
       f' a = let
               (b, c) = f a
               (db, c') = df c
              in (b /+ db, c')
 
-  checkEmpty (DeltaPFun b _) = b
+  checkEmpty (DeltaFunCache b _) = b
 
 
 type ConnSingle f t = Conn f ('JLNonEmpty ('JLSingle t))
@@ -108,7 +126,7 @@ pAppImpl tenv = IFqT (ECons WitTypeable (ECons WitTypeable tenv)) sh $ do
           -> CodeC (Code b, ConnSingle PackedCode (c, Delta a -> c -> (Delta b, c)))
     ff (ECons (PackedCodeDiff pf) (ECons (PackedCodeDiff a) _)) = do
       (b, cc) <- CodeC $ \k -> [||
-          let PFun f deriv_f = $$pf
+          let PFunIFqS (FunCache f deriv_f) = $$pf
               (b, c) = f $$a
           in $$(k ([|| b ||], [|| (c, deriv_f) ||]))
         ||]
@@ -120,7 +138,7 @@ pAppImpl tenv = IFqT (ECons WitTypeable (ECons WitTypeable tenv)) sh $ do
     tr_ff (ECons (PackedCodeDelta pdf) (ECons (PackedCodeDelta da) _)) (CNE (COne (PackedCode cc))) = CodeC $ \k ->
       [||
           let (c, deriv_f) = $$cc
-              DeltaPFun b df = $$pdf
+              DeltaPFunIFqS (DeltaFunCache b df) = $$pdf
               (db1, c1) = if b then (mempty, c) else df c
               (db2, c2) = deriv_f $$da c1
               db = db1 <> db2
@@ -135,22 +153,34 @@ pAppImpl tenv = IFqT (ECons WitTypeable (ECons WitTypeable tenv)) sh $ do
 -- fromDyn :: Typeable a => Dynamic -> a
 -- fromDyn = fromJust Prelude.. fromDynamic
 
-toDynIF :: Typeable c => IFqS (PFun IFqS c a b) (FunD a b)
-toDynIF = IFqS CNone (return (\a -> return (ff a, CNone), \da _ -> return (tr_ff da, CNone)))
+toDynFunCache :: Typeable c => FunCache c a b -> FunCache Dynamic a b
+toDynFunCache (FunCache f deriv_f) = FunCache (second toDyn . f) (\da d -> second toDyn $ deriv_f da (fromJust $ fromDynamic d))
+
+toDynPFunIFqS :: forall c a b. Typeable c => PFun IFqS c a b -> PFun IFqS Dynamic a b
+toDynPFunIFqS = coerce (toDynFunCache :: FunCache c a b -> FunCache Dynamic a b)
+
+toDynDeltaFunCache :: Typeable c => Delta (FunCache c a b) -> Delta (FunCache Dynamic a b)
+toDynDeltaFunCache (DeltaFunCache b df) = DeltaFunCache b (\d -> second toDyn $ df (fromJust $ fromDynamic d))
+
+toDynDeltaPFunIFqS :: forall c a b. Typeable c => Delta (PFun IFqS c a b) -> Delta (PFun IFqS Dynamic a b)
+toDynDeltaPFunIFqS = coerce (toDynDeltaFunCache :: Delta (FunCache c a b) -> Delta (FunCache Dynamic a b))
+
+
+toDynIFqS :: Typeable c => IFqS (PFun IFqS c a b) (PFun IFqS Dynamic a b)
+toDynIFqS = IFqS CNone (return (\a -> return (ff a, CNone), \da _ -> return (tr_ff da, CNone)))
   where
-    ff a = [|| let PFun f deriv_f = $$a
-               in PFun (second toDyn Prelude.. f) (\da d -> second toDyn $ deriv_f da (fromJust $ fromDynamic d)) ||]
+    ff a = [|| toDynPFunIFqS $$a ||]
+    tr_ff x = [|| toDynDeltaPFunIFqS $$x ||]
 
-    tr_ff x = [|| let DeltaPFun b df = $$x
-                  in DeltaPFun b (\d -> second toDyn $ df (fromJust $ fromDynamic d)) ||]
+toDynIF :: forall c a b. Typeable c => IF (PFun IF c a b) (PFun IF Dynamic a b)
+toDynIF = fromStatelessIdentity (coerce (toDynFunCache :: FunCache c a b -> FunCache Dynamic a b)) (coerce toDynDeltaFunCache)
 
-fromDynIF :: IFqS (FunD a b) (PFun IFqS Dynamic a b)
-fromDynIF = IFqS CNone (return (\a -> return (a, CNone), \da _ -> return (da, CNone)))
+-- fromDynIF :: IFqS (PFun IFqS Dynamic a b) (PFun IFqS Dynamic a b)
+-- fromDynIF = IFqS CNone (return (\a -> return (a, CNone), \da _ -> return (da, CNone)))
 
 asType :: a -> a -> a
 asType a _ = a
 
-data instance PFun IFqS c a b = PFun !(a -> (b, c)) !(Delta a -> c -> (Delta b, c))
 instance PFunTerm IFqS IFqT where
   type KK IFqS = Typeable
 
@@ -168,17 +198,18 @@ instance PFunTerm IFqS IFqT where
         let
           h ::  Env PackedCodeDiff as -> Code (PFun IFqS (Env Identity (Flatten cs)) a b)
           h env =
-            [|| PFun (\a -> $$(toCode $ do
+            [|| PFunIFqS $ FunCache
+              (\a -> $$(toCode $ do
                         (b, cs) <- f (ECons (PackedCodeDiff [|| a ||]) env)
                         return [|| ($$b, $$(conn2cenv cs) ) ||]))
-                      (\da c ->
-                          let (db, c') = $$(mkAppD [|| $$lamTr da c ||] $ mapEnv (\(PackedCodeDiff a) -> PackedCodeDelta [|| nilChangeOf $$a ||]) env)
-                          in (db, c'))
+              (\da c ->
+                  let (db, c') = $$(mkAppD [|| $$lamTr da c ||] $ mapEnv (\(PackedCodeDiff a) -> PackedCodeDelta [|| nilChangeOf $$a ||]) env)
+                  in (db, c'))
             ||]
 
           trh :: Env PackedCodeDelta as -> Code (Delta (PFun IFqS (Env Identity (Flatten cs)) a b))
           trh denv =  [||
-              DeltaPFun $$(allEmptyDelta denv) $ \d ->
+              DeltaPFunIFqS . DeltaFunCache  $$(allEmptyDelta denv) $ \d ->
                 let (db, d') = $$(mkAppD [|| $$lamTr mempty d ||] denv)
                 in (db, d')
               ||]
@@ -206,7 +237,7 @@ pAppImplU tenv = IFqTU (ECons WitTypeable (ECons WitTypeable tenv)) sh (ECons ST
           -> CodeC (Code b, ConnSingle PackedCode (c, Delta a -> c -> (Delta b, c)))
     ff (ECons (PackedCodeDiff pf) (ECons (PackedCodeDiff a) _)) = do
       (b, cc) <- CodeC $ \k -> [||
-          let PFun f deriv_f = $$pf
+          let PFunIFqS (FunCache f deriv_f) = $$pf
               (b, c) = f $$a
           in $$(k ([|| b ||], [|| (c, deriv_f) ||]))
         ||]
@@ -218,7 +249,7 @@ pAppImplU tenv = IFqTU (ECons WitTypeable (ECons WitTypeable tenv)) sh (ECons ST
     tr_ff (ECons (PackedCodeDelta pdf) (ECons (PackedCodeDelta da) _)) (CNE (COne (PackedCode cc))) = CodeC $ \k ->
       [||
           let (c, deriv_f) = $$cc
-              DeltaPFun b df = $$pdf
+              DeltaPFunIFqS (DeltaFunCache b df) = $$pdf
               (db1, c1) = if b then (mempty, c) else df c
               (db2, c2) = deriv_f $$da c1
               db = db1 <> db2
@@ -246,17 +277,18 @@ instance PFunTerm IFqS IFqTU where
           ||]
       let h ::  Env PackedCodeDiff (Extr as (SafeTail us)) -> Code (PFun IFqS (Env Identity (Flatten cs)) a b)
           h env =
-            [|| PFun (\a -> $$(toCode $ do
+            [|| PFunIFqS $ FunCache
+              (\a -> $$(toCode $ do
                         (b, cs) <- f (extendEnv tenv u (PackedCodeDiff [|| a ||]) env)
                         return [|| ($$b, $$(conn2cenv cs) ) ||]))
-                      (\da c ->
-                          let (db, c') = $$(mkAppD [|| $$lamTr da c ||] $ mapEnv (\(PackedCodeDiff a) -> PackedCodeDelta [|| nilChangeOf $$a ||]) env)
-                          in (db, c'))
+              (\da c ->
+                  let (db, c') = $$(mkAppD [|| $$lamTr da c ||] $ mapEnv (\(PackedCodeDiff a) -> PackedCodeDelta [|| nilChangeOf $$a ||]) env)
+                  in (db, c'))
             ||]
 
           trh :: Env PackedCodeDelta (Extr as (SafeTail us)) -> Code (Delta (PFun IFqS (Env Identity (Flatten cs)) a b))
           trh denv =  [||
-              DeltaPFun $$(allEmptyDelta denv) $ \d ->
+                       DeltaPFunIFqS . DeltaFunCache $$(allEmptyDelta denv) $ \d ->
                 let (db, d') = $$(mkAppD [|| $$lamTr mempty d ||] denv)
                 in (db, d')
               ||]
@@ -276,6 +308,42 @@ instance PFunTerm IFqS IFqTU where
 
   pAppTerm t1@(IFqTU tenv _ _ _) t2 =
     letTerm t2 $ letTerm (weakenTerm t1) $ pAppImplU tenv
+
+
+newtype instance PFun IF c a b = PFunIF (FunCache c a b)
+  deriving Diff
+
+newtype instance Delta (PFun IF c a b) = DeltaPFunIF (Delta (FunCache c a b))
+
+deriving instance Semigroup (Delta b) => Semigroup (Delta (PFun IF c a b))
+deriving instance Monoid (Delta b) => Monoid (Delta (PFun IF c a b))
+
+instance PFunTerm IF IFT where
+  type KK IF = Typeable
+
+  pAbsTerm (IFT (IF (f :: Env PackedDiff (a ': as) -> (b, c)) tr)) k = k $ IFT $ IF f' tr'
+    where
+      f' :: Env PackedDiff as -> (PFun IF c a b, ())
+      f' env = (PFunIF $ FunCache
+                 (\a -> f (ECons (PackedDiff a) env))
+                 (\da c -> tr (DCons da DMEmpty) c), ())
+
+      tr' :: Delta (Env PackedDiff as) -> () -> (Delta (PFun IF c a b), ())
+      tr' denv _ = (DeltaPFunIF $ DeltaFunCache False $ \c -> tr (DCons mempty denv) c, ())
+
+  pAppTerm e1 e2 = mapTerm appOp (multTerm e1 e2)
+    where
+      appOp :: (DiffTypeable b, DiffTypeable a, Typeable c) => IF (PFun IF c a b , a) b
+      appOp = IF f tr
+        where
+          f (PFunIF (FunCache h trH), a) =
+            let (b, c) = h a
+            in (b, (c, trH))
+
+          tr (PairDelta (DeltaPFunIF (DeltaFunCache b dh)) da) (c, trH) =
+            let (db1, c') = dh c
+                (db2, c'') = if b then trH da c' else (mempty, c')
+            in (db1 <> db2, (c'', trH))
 
 
 
@@ -360,15 +428,22 @@ instance PFunTerm IFqS IFqTU where
 --   appTerm e1 e2 = mapTerm opAppT $ multTerm e1 e2
 
 instance Closed IFqS where
-  type IHom IFqS = FunD
+  type IHom IFqS = PFun IFqS Dynamic
 
 instance FunTerm IFqS IFqT where
-  lamTerm t = pAbsTerm t (mapTerm toDynIF)
-  appTerm e1 e2 = pAppTerm (mapTerm fromDynIF e1) e2
+  lamTerm t = pAbsTerm t (mapTerm toDynIFqS)
+  appTerm e1 e2 = pAppTerm e1 e2
 
 instance FunTerm IFqS IFqTU where
+  lamTerm t = pAbsTerm t (mapTerm toDynIFqS)
+  appTerm e1 e2 = pAppTerm e1 e2
+
+instance Closed IF where
+  type IHom IF = PFun IF Dynamic
+
+instance FunTerm IF IFT where
   lamTerm t = pAbsTerm t (mapTerm toDynIF)
-  appTerm e1 e2 = pAppTerm (mapTerm fromDynIF e1) e2
+  appTerm e1 e2 = pAppTerm e1 e2
 
 -- problematic x0 =
 --   -- (lam (\f -> lam $ \x -> f `app` (f `app` x)) `app` lam (\f -> lam $ \x -> f `app` (f `app` x))) `app` lam (lift incC) `app` x0

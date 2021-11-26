@@ -269,6 +269,34 @@ instance HasProduct IFqS where
   unitOk _ = Wit
   prodOk _ _ _ = Wit
 
+instance Cartesian IFqS where
+  multS (IFqS sh1 m1) (IFqS sh2 m2) = IFqS (joinConn sh1 sh2) $ do
+    (f1, tr1) <- m1
+    (f2, tr2) <- m2
+    let f s = do
+          (a, c1) <- f1 s
+          (b, c2) <- f2 s
+          return ([|| ($$a, $$b) ||], joinConn c1 c2)
+
+        tr ds cc | (c1, c2) <- decompConn (isNone sh1) (isNone sh2) cc = do
+                     (da, c1') <- tr1 ds c1
+                     (db, c2') <- tr2 ds c2
+                     return ([|| pairDelta $$da $$db ||], joinConn c1' c2')
+
+    return (f, tr)
+
+  unitS = fromStatelessCode (const [|| () ||]) (const [|| mempty ||])
+    -- IFq CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| mempty ||], CNone))
+
+  fstS _ _ = fromStatelessCode
+              (\as -> [|| fst $$as ||])
+              (\das -> [|| fstDelta $$das ||])
+
+  sndS _ _ = fromStatelessCode
+              (\as  -> [|| snd $$as ||])
+              (\das -> [|| sndDelta $$das ||])
+
+
 instance IncrementalizedQ IFqS where
   type CodeType IFqS = PackedCode
 

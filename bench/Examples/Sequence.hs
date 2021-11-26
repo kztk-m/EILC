@@ -10,6 +10,7 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE NoMonomorphismRestriction  #-}
 {-# LANGUAGE PolyKinds                  #-}
+{-# LANGUAGE QuantifiedConstraints      #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE StandaloneDeriving         #-}
@@ -24,8 +25,8 @@ module Examples.Sequence (
   S(..), type AtomicDelta(..),
   emptyF, singletonF, concatF, mapF,
 
-  cartesian, cartesianHO,
-  testCode,  testCodeHO,
+  cartesian, cartesianHO, cartesianHORaw,
+  testCode,  testCodeHO, testCodeHORaw,
   ) where
 
 import           Prelude                             hiding ((.))
@@ -56,7 +57,9 @@ import           Language.Unembedding.PseudoFunction
 
 import           Data.Incrementalized.Function
 
+import           Control.Arrow                       ((***))
 import           Data.Functor.Identity
+import           Data.IF                             (IF)
 
 
 newtype S a = S { unS :: Seq.Seq a }
@@ -210,6 +213,13 @@ emptyF = lift emptyC unit
       emptyC = fromStatelessCode (const [|| S Seq.empty ||]) (const [|| dempty ||])
 {-# INLINABLE emptyF #-}
 
+-- emptyRaw ::
+--   (K cat (Unit cat), K cat (S a), App cat e, IncrementalizedQ cat,
+--     CodeType cat ~ Identity) => e (S a)
+-- emptyRaw = lift emptyC unit
+--   where
+--     emptyC = fromStatelessIdentity (const $ S Seq.empty) (const dempty)
+
 -- lengths of inner sequences.
 type ConcatC = Seq.Seq Int
 
@@ -276,6 +286,11 @@ concatF :: (IncrementalizedQ c, App2 c t e, K c ~ DiffTypeable,
 concatF = lift (fromFunctionsCode [|| concatC ||] [|| iterTr trConcatCAtomic ||])
 {-# INLINABLE concatF #-}
 
+concatRaw ::
+  (K cat (S (S a)), K cat (S a), App cat e, IncrementalizedQ cat,
+   Diff a, CodeType cat ~ Identity) =>
+  e (S (S a)) -> e (S a)
+concatRaw = lift (fromFunctionsIdentity concatC (iterTr trConcatCAtomic))
 
 type a @+ b = Join a b
 infixr 5 @+
@@ -287,12 +302,15 @@ class MapAPI cat term | term -> cat where
 
 fromPF ::
   forall cat term s a b f .
-  (LetTerm cat term, PFunTerm cat term, cat ~ IFqS,
+  (LetTerm cat term, PFunTerm cat term, K cat ~ DiffTypeable, KK cat ~ Typeable,
+   forall c. Diff (PFun cat (f c) (S a) (S b)),
    Typeable cat, Typeable f, AllIn s DiffTypeable, DiffTypeable a, DiffTypeable b
   ) =>
   -- Skolem function f is used to represent existential quantification in this scope.
   (forall (c :: Type). Typeable c => cat (PFun cat c a b) (PFun cat (f c) (S a) (S b)))
-  -> term (a ': s) b -> term s (S a) -> term s (S b)
+  -> term (a ': s) b
+  -> term s (S a)
+  -> term s (S b)
 fromPF h e1 e2 =
   pAbsTerm e1 $ \e1' ->
   pAppTerm (mapTerm h e1') e2
@@ -408,15 +426,17 @@ mapF :: forall cat term e a b.
 mapF = flip (liftSO2 (Proxy @'[ '[], '[a] ]) $ \e1 e2 -> letTerm e1 (mapAPI e2))
 
 
-fstF :: (IncrementalizedQ c, App2 c t e,
-         CodeType c ~ PackedCode,
-         K c ~ DiffTypeable, Diff a, Typeable a, Diff b, Typeable b) => e (a, b) -> e a
-fstF = lift $ fromStatelessCode (\a -> [|| fst $$a ||]) (\dz -> [|| fstDelta $$dz||])
+fstF ::
+  forall cat e a b.
+  (Cartesian cat, Prod cat a b ~ (a, b), App cat e, K cat a, K cat b, K cat (a, b))
+  => e (a, b) -> e a
+fstF = lift (fstS (Proxy @a) (Proxy @b))
 
-sndF :: (IncrementalizedQ c, App2 c t e,
-          CodeType c ~ PackedCode,
-         K c ~ DiffTypeable, Diff a, Typeable a, Diff b, Typeable b) => e (a, b) -> e b
-sndF = lift $ fromStatelessCode (\a -> [|| snd $$a ||]) (\dz -> [|| sndDelta $$dz ||])
+sndF ::
+  forall cat e a b.
+  (Cartesian cat, Prod cat a b ~ (a, b), App cat e, K cat a, K cat b, K cat (a, b))
+  => e (a, b) -> e b
+sndF = lift (sndS (Proxy @a) (Proxy @b))
 
 cartesian ::
   (IncrementalizedQ cat, MapAPI cat term, LetTerm cat term,
@@ -428,10 +448,10 @@ cartesian as bs =
   where
     concatMapF f x = concatF (mapF f x)
 
-
-fMapHO :: (Diff a, Diff b, Typeable a) =>
-           PFun IFqS c a b -> (PFun IFqS (Seq c) (S a) (S b), PFun IFqS c a b)
-fMapHO (PFun f df) = (PFun h dh, PFun f df)
+fMapHOBase ::
+  (Diff a, Diff b, Typeable a) =>
+  FunCache c a b -> (FunCache (Seq c) (S a) (S b), FunCache c a b)
+fMapHOBase (FunCache f df) = (FunCache h dh, FunCache f df)
   where
     h (S as) =
       let (bs, cs) = Seq.unzip $ fmap f as
@@ -440,19 +460,42 @@ fMapHO (PFun f df) = (PFun h dh, PFun f df)
       let (db, cs') = iterTr (mapTrChanged f df) das cs
       in (db, cs')
 
-trMapHO :: (Diff a, Diff b, Typeable a) =>
-           Delta (PFun IFqS c a b) -> PFun IFqS c a b -> (Delta (PFun IFqS (Seq c) (S a) (S b)), PFun IFqS c a b)
-trMapHO (DeltaPFun True _dfNN) ft = (DeltaPFun True (\d -> (mempty, d)), ft)
-trMapHO dft@(DeltaPFun _ dfNN) ft =
-  (DeltaPFun False dfNNMap, ft /+ dft)
+fMapHO :: (Diff a, Diff b, Typeable a) =>
+           PFun IFqS c a b -> (PFun IFqS (Seq c) (S a) (S b), PFun IFqS c a b)
+fMapHO (PFunIFqS h) = PFunIFqS *** PFunIFqS $ fMapHOBase h
+
+fMapHORaw :: (Diff a, Diff b, Typeable a) =>
+           PFun IF c a b -> (PFun IF (Seq c) (S a) (S b), PFun IF c a b)
+fMapHORaw (PFunIF h) = PFunIF *** PFunIF $ fMapHOBase h
+
+trMapHOBase ::
+  (Diff a, Diff b, Typeable a) =>
+  Delta (FunCache c a b) -> FunCache c a b -> (Delta (FunCache (Seq c) (S a) (S b)), FunCache c a b)
+trMapHOBase dft ft | checkEmpty dft = (DeltaFunCache True (\d -> (mempty , d)), ft)
+trMapHOBase dft@(DeltaFunCache _ dfNN) ft = (DeltaFunCache False dfNNMap, ft /+ dft)
   where
     dfNNMap cs =
       let (db, cs') = mapTrUnchanged dfNN cs
       in (db, cs')
 
+
+trMapHO :: (Diff a, Diff b, Typeable a) =>
+           Delta (PFun IFqS c a b) -> PFun IFqS c a b -> (Delta (PFun IFqS (Seq c) (S a) (S b)), PFun IFqS c a b)
+trMapHO (DeltaPFunIFqS dft) (PFunIFqS ft) = DeltaPFunIFqS *** PFunIFqS  $ trMapHOBase dft ft
+
+trMapHORaw :: (Diff a, Diff b, Typeable a) =>
+            Delta (PFun IF c a b) -> PFun IF c a b -> (Delta (PFun IF (Seq c) (S a) (S b)), PFun IF c a b)
+trMapHORaw (DeltaPFunIF dft) (PFunIF ft) = DeltaPFunIF *** PFunIF  $ trMapHOBase dft ft
+
+
 mapHOC :: (IncrementalizedQ IFqS, Typeable a, Typeable b, Diff a, Diff b, Typeable c)
          => IFqS (PFun IFqS c a b) (PFun IFqS (Seq c) (S a) (S b))
 mapHOC = fromFunctionsCode [|| fMapHO ||] [|| trMapHO ||]
+
+mapHOCRaw :: (IncrementalizedQ cat, Typeable c, Typeable a, Typeable b, Diff a,
+              Diff b, CodeType cat ~ Identity) =>
+             cat (PFun IF c a b) (PFun IF (Seq c) (S a) (S b))
+mapHOCRaw = fromFunctionsIdentity fMapHORaw trMapHORaw
 
 mapHOAPI ::
   (IncrementalizedQ IFqS, LetTerm IFqS term, PFunTerm IFqS term,
@@ -460,12 +503,24 @@ mapHOAPI ::
   => term (a ': s) b -> term s (S a) -> term s (S b)
 mapHOAPI = fromPF mapHOC
 
+mapHOAPIRaw ::
+  (AllIn s DiffTypeable, PFunTerm IF term, Typeable a, Typeable b,
+   Diff a, Diff b) =>
+  term (a : s) b -> term s (S a) -> term s (S b)
+mapHOAPIRaw = fromPF mapHOCRaw
+
+
 mapHO ::
   forall term e a b.
   (App2 IFqS term e, LetTerm IFqS term, PFunTerm IFqS term, Diff a, Diff b, Typeable a, Typeable b) =>
   (e a -> e b) -> e (S a) -> e (S b)
 mapHO = liftSO2 (Proxy @'[ '[a], '[] ]) mapHOAPI
 
+mapHORaw ::
+  forall term e a b.
+  (App2 IF term e, LetTerm IF term, PFunTerm IF term, Diff a, Diff b, Typeable a, Typeable b) =>
+  (e a -> e b) -> e (S a) -> e (S b)
+mapHORaw = liftSO2 (Proxy @'[ '[a], '[] ]) mapHOAPIRaw
 
 -- mapHOF :: (Diff a, Diff b, Typeable a) => FunD a b -> (FunD (S a) (S b), FunD a b)
 -- mapHOF (FunD f df) = (FunD h dh, FunD f df)
@@ -507,12 +562,20 @@ mapHO = liftSO2 (Proxy @'[ '[a], '[] ]) mapHOAPI
 
 cartesianHO ::
   forall term e a b.
-  (IncrementalizedQ IFqS, PFunTerm IFqS term,
+  (PFunTerm IFqS term,
    App2 IFqS term e, Diff a, Typeable a, Diff b, Typeable b)
    => e (S a) -> e (S b) -> e (S (a, b))
 cartesianHO as bs = concatMapHO (\a -> mapHO (pair a) bs) as
   where
     concatMapHO f x = concatF (mapHO f x)
+
+cartesianHORaw ::
+  (Typeable b, Typeable a, Diff b, Diff a, PFunTerm IF term,
+   App2 IF term e) =>
+  e (S a) -> e (S b) -> e (S (a, b))
+cartesianHORaw as bs = concatMapHORaw (\a -> mapHORaw (pair a) bs) as
+  where
+    concatMapHORaw f x = concatRaw (mapHORaw f x)
 
 
 -- type family PairIfUsed a us cs where
@@ -526,11 +589,12 @@ allEmptyDelta (ECons (PackedCodeDelta da) ENil) = [|| checkEmpty $$da ||]
 allEmptyDelta (ECons (PackedCodeDelta da) das)  = [|| checkEmpty $$da && $$(allEmptyDelta das) ||]
 
 
-type TestCodeType =
-  Code
+type TestType =
     ((S Int, S Int)
     -> (S (Int, Int),
         Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int)))))
+
+type TestCodeType = Code TestType
 
 
 testCode :: (cat ~ IFqS, MapAPI cat term, LetTerm cat term, IncrementalizedQ cat, Term cat term) => Proxy term -> TestCodeType
@@ -540,6 +604,9 @@ testCodeHO ::
   (PFunTerm IFqS t) => Proxy t -> TestCodeType
 testCodeHO proxy = compileCode $ runMonoWith proxy $ \xs -> cartesianHO (fstF xs) (sndF xs)
 
+testCodeHORaw ::
+  (PFunTerm IF t) => Proxy t -> TestType
+testCodeHORaw proxy = compileIdentity $ runMonoWith proxy $ \xs -> cartesianHORaw (fstF xs) (sndF xs)
 
 -- >>> let f = $$( testCode $ Proxy @IFqT )
 -- >>> let (res, tr) = f (S $ Seq.fromList [1,2,3], S $ Seq.fromList [10, 20, 30])
