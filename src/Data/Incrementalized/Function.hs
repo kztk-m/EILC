@@ -203,8 +203,11 @@ instance PFunTerm IFqS IFqT where
                         (b, cs) <- f (ECons (PackedCodeDiff [|| a ||]) env)
                         return [|| ($$b, $$(conn2cenv cs) ) ||]))
               (\da c ->
-                  let (db, c') = $$(mkAppD [|| $$lamTr da c ||] $ mapEnv (\(PackedCodeDiff a) -> PackedCodeDelta [|| nilChangeOf $$a ||]) env)
-                  in (db, c'))
+                  if checkEmpty da then
+                    (mempty, c)
+                  else
+                    let (db, c') = $$(mkAppD [|| $$lamTr da c ||] $ mapEnv (\(PackedCodeDiff a) -> PackedCodeDelta [|| nilChangeOf $$a ||]) env)
+                    in (db, c'))
             ||]
 
           trh :: Env PackedCodeDelta as -> Code (Delta (PFun IFqS (Env Identity (Flatten cs)) a b))
@@ -282,8 +285,11 @@ instance PFunTerm IFqS IFqTU where
                         (b, cs) <- f (extendEnv tenv u (PackedCodeDiff [|| a ||]) env)
                         return [|| ($$b, $$(conn2cenv cs) ) ||]))
               (\da c ->
-                  let (db, c') = $$(mkAppD [|| $$lamTr da c ||] $ mapEnv (\(PackedCodeDiff a) -> PackedCodeDelta [|| nilChangeOf $$a ||]) env)
-                  in (db, c'))
+                  if checkEmpty da then
+                    (mempty, c)
+                  else
+                    let (db, c') = $$(mkAppD [|| $$lamTr da c ||] $ mapEnv (\(PackedCodeDiff a) -> PackedCodeDelta [|| nilChangeOf $$a ||]) env)
+                    in (db, c'))
             ||]
 
           trh :: Env PackedCodeDelta (Extr as (SafeTail us)) -> Code (Delta (PFun IFqS (Env Identity (Flatten cs)) a b))
@@ -326,10 +332,15 @@ instance PFunTerm IF IFT where
       f' :: Env PackedDiff as -> (PFun IF c a b, ())
       f' env = (PFunIF $ FunCache
                  (\a -> f (ECons (PackedDiff a) env))
-                 (\da c -> tr (DCons da DMEmpty) c), ())
+                 (\da c -> if checkEmpty da then (mempty, c) else tr (DCons da DMEmpty) c), ())
 
       tr' :: Delta (Env PackedDiff as) -> () -> (Delta (PFun IF c a b), ())
-      tr' denv _ = (DeltaPFunIF $ DeltaFunCache False $ \c -> tr (DCons mempty denv) c, ())
+      tr' denv _ = (DeltaPFunIF $ DeltaFunCache (checkAllEmpty denv) $ \c -> tr (DCons mempty denv) c, ())
+
+      checkAllEmpty :: forall xs. Delta (Env PackedDiff xs) -> Bool
+      checkAllEmpty DNil           = True
+      checkAllEmpty DMEmpty        = True
+      checkAllEmpty (DCons da das) = checkEmpty da && checkAllEmpty das
 
   pAppTerm e1 e2 = mapTerm appOp (multTerm e1 e2)
     where
