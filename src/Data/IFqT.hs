@@ -1,22 +1,22 @@
+{-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE KindSignatures            #-}
+{-# LANGUAGE LambdaCase                #-}
 {-# LANGUAGE MultiParamTypeClasses     #-}
+{-# LANGUAGE PolyKinds                 #-}
 {-# LANGUAGE TemplateHaskell           #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies              #-}
+{-# LANGUAGE TypeOperators             #-}
 
 module Data.IFqT where
 
 import           Data.Code            (Code, CodeC, PackedCode,
                                        PackedCodeDelta (PackedCodeDelta),
                                        PackedCodeDiff (..), mkLet)
+import           Data.Conn            (Conn (..), decompConn, isNone, joinConn)
 import           Data.Delta           (Delta, pairDelta)
 import           Data.Env             (Env (..))
-import           Data.Conn            (Conn (..), decompConn, isNone, joinConn)
 import           Data.IFq             (IFqS (..), convTEnv)
 
 import           Data.Code.Lifting    (WitTypeable (WitTypeable))
@@ -104,59 +104,3 @@ instance LetTerm IFqS IFqT where
         (db, c2') <- tr2 (ECons (PackedCodeDelta dv) s) c2
         return (db, joinConn c1' c2')
     return (f, tr)
-
--- data CodeInteractionStepT as b =
---   forall cs. CodeInteractionStepT (Conn PackedCode cs) (Env PackedCodeDelta as -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
-
-
--- data IFqT as b =
---   IFqT (Env WitTypeable as)
---        (Env PackedCodeDiff as -> CodeC (Code b, CodeInteractionStepT as b))
-
-
--- instance Term IFq IFqT where
---   mapTerm (IFq h2) (IFqT tenv h1) = IFqT tenv $ \env -> do
---     (a, CodeInteractionStepT c1init step1) <- h1 env
---     (b, CodeInteractionStep  c2init step2) <- h2 a
---     let step da cc | (c1, c2) <- decompConn (isNone c1init) (isNone c2init) cc = do
---                        (db, c1') <- step1 da c1
---                        (dc, c2') <- step2 db c2
---                        return (dc, joinConn c1' c2')
---     return (b, CodeInteractionStepT (joinConn c1init c2init) step)
-
---   multTerm (IFqT tenv h1) (IFqT _ h2) = IFqT tenv $ \env -> do
---     (a, CodeInteractionStepT c1init step1) <- h1 env
---     (b, CodeInteractionStepT c2init step2) <- h2 env
---     let step denv cc | (c1, c2) <- decompConn (isNone c1init) (isNone c2init) cc = do
---                        (da, c1') <- step1 denv c1
---                        (db, c2') <- step2 denv c2
---                        r <- mkLet [|| pairDelta $$da $$db ||]
---                        return (r, joinConn c1' c2')
---     return ([|| ($$a, $$b) ||], CodeInteractionStepT (joinConn c1init c2init) step)
-
---   unitTerm tenv = IFqT (convTEnv tenv) $ \_ ->
---     return ([|| () ||], CodeInteractionStepT CNone (\_ _ -> return ([|| mempty ||], CNone)))
-
---   var0Term tenv = IFqT (ECons WitTypeable $ convTEnv tenv) $ \(ECons (PackedCodeDiff a) _) -> do
---     return (a, CodeInteractionStepT CNone $ \(ECons (PackedCodeDelta da) _) _ -> return (da, CNone))
-
---   weakenTerm (IFqT tenv h) = IFqT (ECons WitTypeable tenv) $ \(ECons _ env) -> do
---     (a, CodeInteractionStepT cinit step) <- h env
---     return (a, CodeInteractionStepT cinit $ \(ECons _ denv) -> step denv)
-
---   unliftTerm (IFqT _ h) = IFq $ \a -> do
---     (b, CodeInteractionStepT cinit step) <- h (ECons (PackedCodeDiff a) ENil)
---     return (b, CodeInteractionStep cinit $ \da -> step (ECons (PackedCodeDelta da) ENil))
-
-
--- instance LetTerm IFq IFqT where
---   letTerm (IFqT tenv h1) (IFqT _ h2) = IFqT tenv $ \env -> do
---     (a, CodeInteractionStepT c1init step1) <- h1 env
---     v <- mkLet a
---     (b, CodeInteractionStepT c2init step2) <- h2 (ECons (PackedCodeDiff v) env)
---     let step denv cc | (c1, c2) <- decompConn (isNone c1init) (isNone c2init) cc = do
---                          (da, c1') <- step1 denv c1
---                          (db, c2') <- step2 (ECons (PackedCodeDelta da) denv) c2
---                          return (db, joinConn c1' c2')
---     return (b, CodeInteractionStepT (joinConn c1init c2init) step)
-
