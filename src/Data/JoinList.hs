@@ -8,9 +8,9 @@ module Data.JoinList
   )
   where
 
-data JoinListNE a = JLSingle a | JLJoin (JoinListNE a) (JoinListNE a)
+data JoinListNE a = JLSingle a | JLJoin !(JoinListNE a) !(JoinListNE a)
   deriving (Functor, Foldable, Traversable)
-data JoinList a = JLNil | JLNonEmpty (JoinListNE a)
+data JoinList a = JLNil | JLNonEmpty !(JoinListNE a)
   deriving (Functor, Foldable, Traversable)
 
 instance Semigroup (JoinListNE a) where
