@@ -9,6 +9,7 @@
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE InstanceSigs          #-}
 
 module Data.Incrementalized.Function (
@@ -16,7 +17,7 @@ module Data.Incrementalized.Function (
     -- FunT(..), type Delta (..), IsEmpty(..),
     ensureSameType,
     PFun(..), type Delta (..), FunD
-  ) where
+  ,PFunI) where
 
 import           Data.Dynamic                        (Dynamic, fromDynamic,
                                                       toDyn)
@@ -53,42 +54,8 @@ import           Data.JoinList
 See ./note/meeting_doc_Nov_2021.
 -}
 
-
--- type MyState s a = s -> (a, s)
-
-
-
-
--- data FunD a b =
---   FunD !(a -> (b, Dynamic))
---        !(Delta a -> MyState Dynamic (Delta b)) -- must satisfy tr 0 d = (0, d)
-
--- data instance Delta (FunD a b) =
---   DFunD { dfunIsEmpty :: !Bool,
---           dfunTrNN :: !(MyState Dynamic (Delta b)) }
-
--- instance Semigroup (Delta b) => Semigroup (Delta (FunD a b)) where
---   DFunD b1 dfNN1 <> DFunD b2 dfNN2 = DFunD (b1 && b2) $ \s ->
---     let (db1, s1) = dfNN1 s
---         (db2, s2) = dfNN2 s1
---     in (db1 <> db2, s2)
-
--- instance Monoid (Delta b) => Monoid (Delta (FunD a b)) where
---   mempty = DFunD True (\s -> (mempty , s))
-
--- instance (Diff a, Diff b) => Diff (FunD a b) where
---   FunD f ftr /+ DFunD True _ = FunD f ftr
---   FunD f ftr /+ DFunD _ ftr' = FunD (\a -> let (b, s) = f a in
---                                            let (db, s') = ftr' s in
---                                              (b /+ db, s')) ftr
-
---   checkEmpty (DFunD b _) = b
-
-  -- emptify (DFunD _ ftr) = DFunD True $ \a -> first emptify $ ftr a
-
-  -- emptyOf (FunD _ ftr) = DFunD True $ \(c,a) -> ftr (emptyOf a) (c, a)
-
-type FunD = PFun IFqS Dynamic
+type PFunI = PFun IFqS
+type FunD  = PFun IFqS Dynamic
 
 toDynI :: Typeable cs => Env Identity cs -> Dynamic
 toDynI = toDyn
@@ -104,12 +71,12 @@ allEmptyDelta (ECons (PackedCodeDelta da) das)  = [|| checkEmpty $$da && $$(allE
 ensureSameType :: a -> a -> ()
 ensureSameType _ _ = ()
 
-data instance Delta (PFun IFqS c a b) = DeltaPFun Bool !(c -> (Delta b, c))
+data instance Delta (PFun IFqS c a b) = DeltaPFun !Bool !(c -> (Delta b, c))
 
 instance Semigroup (Delta b) => Semigroup (Delta (PFun IFqS c a b)) where
   DeltaPFun b1 df1 <> DeltaPFun b2 df2 = DeltaPFun (b1 && b2) $ \c ->
-    let (db1, c1) = df1 c
-        (db2, c2) = df2 c1
+    let (!db1, !c1) = df1 c
+        (!db2, !c2) = df2 c1
     in (db1 <> db2, c2)
 
 instance Monoid (Delta b) => Monoid (Delta (PFun IFqS c a b)) where
@@ -165,8 +132,8 @@ pAppImpl tenv = IFqT (ECons WitTypeable (ECons WitTypeable tenv)) sh $ do
   where
     sh = CSingle WitTypeable
 
-fromDyn :: Typeable a => Dynamic -> a
-fromDyn = fromJust Prelude.. fromDynamic
+-- fromDyn :: Typeable a => Dynamic -> a
+-- fromDyn = fromJust Prelude.. fromDynamic
 
 toDynIF :: Typeable c => IFqS (PFun IFqS c a b) (FunD a b)
 toDynIF = IFqS CNone (return (\a -> return (ff a, CNone), \da _ -> return (tr_ff da, CNone)))
@@ -193,7 +160,7 @@ instance PFunTerm IFqS IFqT where
         lamTr :: Code (Delta a -> Env Identity (Flatten cs) -> DFunc as (Delta b, Env Identity (Flatten cs))) <-
             mkLetMono [||
                   -- inefficiency: denv may contain unused variables.
-                  \da c -> $$(mkAbsD tenv $ \denv -> toCode $ do
+                  \da c -> $$(mkAbsD_ tenv $ \denv -> toCode $ do
                       cs <- CodeC $ cenv2conn sh [|| c ||]
                       (db, cs') <- tr (ECons (PackedCodeDelta [|| da ||]) denv) cs
                       return [|| ($$db, $$(conn2cenv cs') `asType` c) ||])
@@ -392,13 +359,14 @@ instance PFunTerm IFqS IFqTU where
 --   lamTerm = cLamT
 --   appTerm e1 e2 = mapTerm opAppT $ multTerm e1 e2
 
-instance FunTerm IFqS IFqT where
+instance Closed IFqS where
   type IHom IFqS = FunD
+
+instance FunTerm IFqS IFqT where
   lamTerm t = pAbsTerm t (mapTerm toDynIF)
   appTerm e1 e2 = pAppTerm (mapTerm fromDynIF e1) e2
 
 instance FunTerm IFqS IFqTU where
-  type IHom IFqS = FunD
   lamTerm t = pAbsTerm t (mapTerm toDynIF)
   appTerm e1 e2 = pAppTerm (mapTerm fromDynIF e1) e2
 

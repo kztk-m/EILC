@@ -16,11 +16,12 @@ import           Data.Typeable        (Proxy (..))
 
 import           Data.Code
 import           Data.Delta           (Delta, Diff, DiffTypeable, pairDelta)
-import           Data.Env             (AllIn, Env (..))
+import           Data.Env             (Env (..))
 import           Language.Unembedding (CategoryK (..), HasProduct (..),
                                        LetTerm (..), Term (..), Wit (Wit))
 
 import           Data.Code.Lifting    (DFunc)
+import           Data.Coerce          (coerce)
 import           Data.Incrementalized (IncrementalizedQ (..))
 import           Data.Interaction     (Interaction (..))
 
@@ -94,17 +95,17 @@ unfoldI seed0 step = go seed0
 
 
 instance IncrementalizedQ IFF where
-  type CodeType IFF a = Code a
+  type CodeType IFF = PackedCode
 
   fromStateless f df = IFF $ \a -> do
-    b <- mkLet $ f a
-    return (b, [|| staticInteraction (\da -> $$(df [|| da ||])) ||])
+    b <- mkLet $ coerce f a
+    return (b, [|| staticInteraction (\da -> $$(coerce df [|| da ||])) ||])
 
-  fromFunctions _ f df = IFF $ \a -> do
+  fromFunctions _ (PackedCode f) (PackedCode df) = IFF $ \a -> do
     (b, c) <- CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], [|| c ||])) ||]
     return (b, [|| unfoldI $$c $$df ||] )
 
-  compile (IFF h) = [|| \a -> $$(runCodeC (h [|| a ||]) $ \(b, i) -> [|| ($$b, $$i) ||]) ||]
+  compile (IFF h) = PackedCode [|| \a -> $$(runCodeC (h [|| a ||]) $ \(b, i) -> [|| ($$b, $$i) ||]) ||]
 
 
 

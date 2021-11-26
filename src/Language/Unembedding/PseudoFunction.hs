@@ -21,7 +21,7 @@ data ExTerm cat term as a b = forall c. ExTerm (term as (PFun cat c a b))
 
 data family PFun (cat :: k -> k -> Type) (c :: k) :: k -> k -> k
 
-class Term cat term => PFunTerm cat (term :: [k] -> k -> Type) where
+class LetTerm cat term => PFunTerm cat (term :: [k] -> k -> Type) where
   type KK cat :: k -> Constraint
 
   pAbsTerm ::

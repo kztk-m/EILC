@@ -14,7 +14,7 @@ module Data.Code.Lifting where
 
 import           Data.Code
 import           Data.Conn
-import           Data.Delta            (Delta, Diff, DiffTypeable)
+import           Data.Delta            (Delta, DiffTypeable)
 import           Data.Env
 import           Data.Functor.Identity
 import           Data.Kind             (Type)
@@ -197,6 +197,12 @@ mkAbsED :: forall as r proxy. AllIn as DiffTypeable => Env proxy as -> (Env Pack
 mkAbsED ENil f         = f ENil
 mkAbsED (ECons _ sh) f = [|| \a -> $$(mkAbsED sh (f Prelude.. ECons (PackedCodeDiff [|| a ||])) ) ||]
 
+
+-- A variant of 'mkAbsED' that uses underscored variables to supress "Defined but not used" warnings.
+mkAbsED_ :: forall as r proxy. AllIn as DiffTypeable => Env proxy as -> (Env PackedCodeDiff as -> Code r) -> Code (EFunc as r)
+mkAbsED_ ENil f         = f ENil
+mkAbsED_ (ECons _ sh) f = [|| \_a -> $$(mkAbsED_ sh (f Prelude.. ECons (PackedCodeDiff [|| _a ||])) ) ||]
+
 mkAppE :: forall as r. Code (EFunc as r) -> Env PackedCode as -> Code r
 mkAppE f ENil                      = f
 mkAppE f (ECons (PackedCode a) as) = mkAppE [|| $$f $$a ||] as
@@ -215,6 +221,13 @@ mkAbsD :: forall as r proxy. (AllIn as DiffTypeable) => Env proxy as -> (Env Pac
 mkAbsD ENil f         = f ENil
 mkAbsD (ECons _ sh) f =
   [|| \a -> $$(mkAbsD sh (f Prelude.. ECons (PackedCodeDelta [|| a ||])) ) ||]
+
+-- A variant of 'mkAbsD' that uses underscored variables to supress "Defined but not used" warnings.
+mkAbsD_ :: forall as r proxy. (AllIn as DiffTypeable) => Env proxy as -> (Env PackedCodeDelta as -> Code r) -> Code (DFunc as r)
+mkAbsD_ ENil f         = f ENil
+mkAbsD_ (ECons _ sh) f =
+  [|| \_a -> $$(mkAbsD_ sh (f Prelude.. ECons (PackedCodeDelta [|| _a ||])) ) ||]
+
 
 mkAppD :: forall as r. Code (DFunc as r) -> Env PackedCodeDelta as -> Code r
 mkAppD f ENil                           = f

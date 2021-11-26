@@ -16,7 +16,8 @@
 {-# LANGUAGE UndecidableInstances   #-}
 module Language.Unembedding (
 
-  HasProduct(..), Term(..), LetTerm(..), FunTerm(..),
+  HasProduct(..), Closed(..),
+  Term(..), LetTerm(..), FunTerm(..),
 
 
   App(..),
@@ -36,14 +37,12 @@ module Language.Unembedding (
   share, lam, app
   ) where
 
--- import           Control.Category
--- import           Control.Category
-import           Data.Kind     (Constraint, Type)
-import           Prelude       hiding (id, (.))
-
 import           Data.Env
+import           Data.Kind     (Constraint, Type)
 import           Data.Proxy    (Proxy (..))
 import           Debug.Trace
+import           Prelude       hiding (id, (.))
+import qualified Prelude
 import           Text.Printf
 import qualified Unsafe.Coerce as Unsafe
 
@@ -61,7 +60,7 @@ instance NoConstraint a
 instance CategoryK (->) where
   type K (->) = NoConstraint
   id x = x
-  f . g = \x -> f (g x)
+  (.) = (Prelude..)
 
 
 data Wit c where
@@ -109,7 +108,7 @@ instance res ~ e b => PackFunArg c e '[] b res where
   packFunArg res = Fun ENil (\ENil -> res)
 
 instance PackFunArg c e as b res => PackFunArg c e (a ': as) b (e a -> res) where
-  unpackFunArg (Fun (ECons _ tenv) f) = \arg -> unpackFunArg @c $ Fun tenv (\args -> f $ ECons arg args)
+  unpackFunArg (Fun (ECons _ tenv) f) = \arg -> unpackFunArg @c $ Fun tenv (f . ECons arg)
   packFunArg f = Fun toEnvProxy $ \(ECons arg args) ->
     case packFunArg @c @e @as (f arg) of
       Fun _ res -> res args
@@ -228,12 +227,14 @@ class (CategoryK cat, HasProduct cat) => Term cat (term :: [k] -> k -> Type) | t
 class Term cat term => LetTerm cat term where
   letTerm :: (AllIn s (K cat), K cat a, K cat b) => term s a -> term (a ': s) b -> term s b
 
-class LetTerm cat term => FunTerm cat (term :: [k] -> k -> Type) where
---  type IHom cat (a :: k) (b :: k) :: k
+class HasProduct cat => Closed cat where
+  -- | Internal hom object. To avoid duplication of work, we put all the related methods into 'FunTerm'
   type IHom cat :: k -> k -> k
+
+
+class (LetTerm cat term, Closed cat) => FunTerm cat (term :: [k] -> k -> Type) where
   lamTerm   :: (AllIn s (K cat), K cat a, K cat b) => term (a : s) b -> term s (IHom cat a b)
   appTerm   :: (AllIn s (K cat), K cat a, K cat b) => term s (IHom cat a b) -> term s a -> term s b
---  unlamTerm :: (AllIn s (K cat), K cat a, K cat b) => term s (IHom cat a b) -> term (a : s) b
 
 share ::
   forall cat term e a b.
@@ -270,22 +271,8 @@ class (CategoryK cat, HasProduct cat) => Cartesian cat where
   fstS  :: forall a b. (K cat a, K cat b, K cat (Prod cat a b)) => Proxy a -> Proxy b -> cat (Prod cat a b) a
   sndS  :: forall a b. (K cat a, K cat b, K cat (Prod cat a b)) => Proxy a -> Proxy b -> cat (Prod cat a b) b
 
--- instance (CategoryK cat, Cartesian cat, HasProduct cat) => Term cat (TermFromCat cat) where
---   mapTerm f (TermFromCat x) = TermFromCat (f . x)
-
---   multTerm (TermFromCat x) (TermFromCat y) = TermFromCat (multS x y)
---   unitTerm _ = TermFromCat unitS
-
---   var0Term :: forall s a. Env Proxy s -> TermFromCat cat (a ': s) a
---   var0Term _ = TermFromCat @cat @(a ': s) @a (fstS @cat @a @(Products cat s) Proxy Proxy)
-
---   weakenTerm :: forall s a b. TermFromCat cat s a -> TermFromCat cat (b ': s) a
---   weakenTerm (TermFromCat x) = TermFromCat @cat @(b : s) @a $
---     x . sndS @cat @b @(Products cat s) Proxy Proxy
-
-
---   unliftTerm (TermFromCat x) = x . multS id unitS
-
+-- | Semantics for unebedding.
+--   FIXME: We later move this implementation into other module and makes this module not to expose the definition.
 newtype TSem cat term b = TSem { runTSem :: forall as. AllIn as (K cat) => Env Proxy as -> term as b }
 
 instance Term cat term => App cat (TSem cat term) where
@@ -310,7 +297,7 @@ instance Term cat term => App2 cat term (TSem cat term) where
     where
       convert :: forall as a. AllIn as (K cat) => Env Proxy as -> Fun (K cat) (TSem cat term) a -> TermF (K cat) term as a
       convert tenv (Fun etenv f) = case allAppend (Proxy @(K cat)) (Proxy @as) etenv of
-        Wit -> TermF $ runTSem (f $ makeArgs Proxy Proxy extendedTEnv extendedTEnv (\x -> x) etenv) extendedTEnv
+        Wit -> TermF $ runTSem (f $ makeArgs Proxy Proxy extendedTEnv extendedTEnv Prelude.id etenv) extendedTEnv
         where
           -- essentially makes
           --   [trans x0, trans x1, trans x2, ..., trans xn]
@@ -326,16 +313,10 @@ instance Term cat term => App2 cat term (TSem cat term) where
           makeArgs pHs (pAs :: Proxy as) (ECons _ baseEnv) extended weaken (ECons (_ :: Proxy b) (argTypes :: Env Proxy argTys)) =
             let arg :: TSem cat term b
                 arg = TSem $ \tenv' -> diffT extended tenv' (weaken $ var0Term baseEnv)
-            in ECons arg $ makeArgs pHs pAs baseEnv extended (\x -> weaken (weakenTerm x))  argTypes
+            in ECons arg $ makeArgs pHs pAs baseEnv extended (weaken . weakenTerm)  argTypes
 
           extendedTEnv = appendEnv etenv tenv
 
-
---      convert tenv f = TermF (convert' tenv f)
-
-      -- convert' :: Env Proxy as -> Fun (TSem term) (ts ~> r) -> term (Append ts as) r
-      -- convert' tenv (Body body) = _
-      -- convert' tenv (Abs f)     = _
 
 diffT :: (Term cat term, AllIn as (K cat), AllIn bs (K cat), K cat a) => Env Proxy as -> Env Proxy bs -> term as a -> term bs a
 diffT tenv1 tenv2 | trace (printf "Diff: #tenv1 = %d and #tenv2 = %d" (lenEnv tenv1) (lenEnv tenv2)) False = undefined

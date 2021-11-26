@@ -80,26 +80,26 @@ instance CategoryK IFq where
 
 
 instance IncrementalizedQ IFq where
-  type CodeType IFq a = Code a
+  type CodeType IFq = PackedCode
 
   fromStateless f df = IFq $ \a -> do
-    v <- mkLet (f a)
+    v <- mkLet (coerce f a)
     return (v, CodeInteractionStep CNone step)
     where
       step da _ = do
-        v <- mkLet (df da)
+        v <- mkLet (coerce df da)
         return (v, CNone)
 
 --    IFq CNone (\a -> do { v <- mkLet (f a); return (v, CNone) }) (\da _ -> do { v <- mkLet (df da) ; return (v, CNone) })
 
   fromFunctions _ f df = IFq $ \a -> do
     (b, c0) <- CodeC $ \k -> [||
-        let (b, c) = $$f $$a
+        let (b, c) = $$(unPackCode f) $$a
         in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))))
       ||]
     let step da (CNE (COne (PackedCode c))) = CodeC $ \k ->
           [||
-             let (db, c') = $$df $$da $$c
+             let (db, c') = $$(unPackCode df) $$da $$c
              in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||]))))
            ||]
     return (b, CodeInteractionStep c0 step)
@@ -109,7 +109,7 @@ instance IncrementalizedQ IFq where
     --     (\da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
     --       [|| let (db, c') = $$df $$da $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
 
-  compile (IFq h) = [|| \a -> $$(toCode $ do
+  compile (IFq h) = PackedCode [|| \a -> $$(toCode $ do
             (b, CodeInteractionStep c0 step) <- h [|| a ||]
             i <- CodeC $ \k -> [||
                   let int = $$(mkAbsBang c0 $ \cs ->
@@ -206,14 +206,14 @@ runIFq = \f tr ->
 
 instance Cartesian IFq where
   multS = multIFq
-  unitS = fromStateless (const [|| () ||]) (const [|| mempty ||])
+  unitS = fromStatelessCode (const [|| () ||]) (const [|| mempty ||])
     -- IFq CNone (\_ -> return ([|| () ||], CNone)) (\_ _ -> return ([|| mempty ||], CNone))
 
-  fstS _ _ = fromStateless
+  fstS _ _ = fromStatelessCode
               (\as -> [|| fst $$as ||])
               (\das -> [|| fstDelta $$das ||])
 
-  sndS _ _ = fromStateless
+  sndS _ _ = fromStatelessCode
               (\as  -> [|| snd $$as ||])
               (\das -> [|| sndDelta $$das ||])
 
@@ -270,20 +270,20 @@ instance HasProduct IFqS where
   prodOk _ _ _ = Wit
 
 instance IncrementalizedQ IFqS where
-  type CodeType IFqS a = Code a
+  type CodeType IFqS = PackedCode
 
   fromStateless f df =
     IFqS CNone $
-      return (\a -> do { v <- mkLet (f a); return (v, CNone) },
-              \da _ -> do { v <- mkLet (df da) ; return (v, CNone) })
+      return (\a -> do { v <- mkLet (coerce f a); return (v, CNone) },
+              \da _ -> do { v <- mkLet (coerce df da) ; return (v, CNone) })
 
-  fromFunctions _ f df =
+  fromFunctions _ (PackedCode f) (PackedCode df) =
     IFqS (CNE (COne WitTypeable)) $
       return
         (\a -> CodeC $ \k -> [|| let (b, c) = $$f $$a in $$(k ([|| b ||], CNE (COne (PackedCode [|| c ||]))) ) ||],
          \da (CNE (COne (PackedCode c))) -> CodeC $ \k ->
            [|| let (db, c') = $$df $$da $$c in $$(k ([|| db ||], CNE (COne (PackedCode [|| c' ||])))) ||])
 
-  compile (IFqS _ m) = toCode $ do
+  compile (IFqS _ m) = PackedCode $ toCode $ do
     (f, tr) <- m
     return $ runIFq f tr

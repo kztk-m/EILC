@@ -18,10 +18,9 @@ import           Data.Interaction
 
 import           Data.List         (foldl')
 
-import           Data.IFFT         (IFFT)
+-- import           Data.IFFT         (IFFT)
 import           Data.IFqT         (IFqT)
-import           Data.IFqTE        (IFqTE)
-import           Data.IFqTEU       (IFqTEUS)
+import           Data.IFqTU        (IFqTU)
 
 import           Data.Proxy        (Proxy (..))
 
@@ -87,18 +86,19 @@ tryScratch h = go (fst . h)
 
 
 
-dCartesianT, dCartesianTE, dCartesianTEUS, dCartesianF :: (S Int, S Int) -> (S (Int, Int), Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int))))
+dCartesianT, dCartesianTHO, dCartesianTU :: (S Int, S Int) -> (S (Int, Int), Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int))))
 
 dCartesianT   = $$( testCode (Proxy :: Proxy IFqT) )
 dCartesianTHO = $$( testCodeHO (Proxy :: Proxy IFqT) )
-dCartesianTE  = $$( testCode (Proxy :: Proxy IFqTE ) )
-dCartesianTEUS = $$( testCode (Proxy :: Proxy IFqTEUS ) )
-dCartesianF   = $$( testCode (Proxy :: Proxy IFFT ) )
+dCartesianTU  = $$( testCodeHO (Proxy :: Proxy IFqTU) )
+-- dCartesianTE  = $$( testCode (Proxy :: Proxy IFqTE ) )
+-- dCartesianTEUS = $$( testCode (Proxy :: Proxy IFqTEUS ) )
+-- dCartesianF   = $$( testCode (Proxy :: Proxy IFFT ) )
 
 
 forProf :: ()
 forProf =
-  rnf $ tryInc dCartesianTEUS (mkInitSequences 1000) (insOuter 100 <> insInner 100)
+  rnf $ tryInc dCartesianTU (mkInitSequences 1000) (insOuter 100 <> insInner 100)
 
 doBench :: String -> (S Int, S Int) -> [Delta (S Int, S Int)] -> Benchmark
 doBench gname a0 ds =
@@ -107,9 +107,7 @@ doBench gname a0 ds =
       bench "S"     $ nf (tryScratch dCartesianT a0') ds',
       bench "T"     $ nf (tryInc dCartesianT a0') ds' ,
       bench "THO"   $ nf (tryInc dCartesianTHO a0') ds',
-      bench "TE"    $ nf (tryInc dCartesianTE a0') ds' ,
-      bench "TEUS"  $ nf (tryInc dCartesianTEUS a0') ds',
-      bench "F"     $ nf (tryInc dCartesianF a0') ds'
+      bench "TU"    $ nf (tryInc dCartesianTU  a0') ds'
     ]
 
 
