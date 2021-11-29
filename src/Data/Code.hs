@@ -3,7 +3,19 @@
 {-# LANGUAGE RankNTypes      #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Data.Code where
+module Data.Code (
+  Code, CodeC(..), toCode,
+
+  -- * Query
+  isSimple,
+
+  -- * Sharing
+  mkLet, shareNonGen, mkLetEnv, mkLetEnvD,
+
+  -- * Newtype/Datatype Wrappers
+  PackedCode(..), PackedCodeDiff(..), PackedCodeDelta(..)
+
+  ) where
 
 import           Data.Delta          (Delta, Diff)
 import           Data.Function       ((&))
@@ -68,7 +80,7 @@ data PackedCodeDiff a where
   PackedCodeDiff :: Diff a => Code a -> PackedCodeDiff a
 
 mkLetEnv :: Env PackedCode aa -> CodeC (Env PackedCode aa)
-mkLetEnv = mapEnvA (\(PackedCode c) -> PackedCode <$> mkLet c)
+mkLetEnv = traverseEnv (\(PackedCode c) -> PackedCode <$> mkLet c)
 
 mkLetEnvD :: Env PackedCodeDelta aa -> CodeC (Env PackedCodeDelta aa)
-mkLetEnvD = mapEnvA (\(PackedCodeDelta c) -> PackedCodeDelta <$> mkLet c)
+mkLetEnvD = traverseEnv (\(PackedCodeDelta c) -> PackedCodeDelta <$> mkLet c)

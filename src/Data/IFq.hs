@@ -11,7 +11,12 @@
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
-module Data.IFq where
+module Data.IFq (
+  IFqS(..), IFq(..), convTEnv,
+
+  -- * Exporting for spliced code
+  mkInteraction, ensureDiffType,
+  ) where
 
 
 import           Prelude              hiding (id, (.))
@@ -31,13 +36,13 @@ import           Data.Interaction
 import           Language.Unembedding
 
 
-mkLetConn :: Conn PackedCode cs -> CodeC (Conn PackedCode cs)
-mkLetConn CNone = return CNone
-mkLetConn (CNE e) = CNE <$> mkLetConn' e
-  where
-    mkLetConn' :: NEConn PackedCode cs -> CodeC (NEConn PackedCode cs)
-    mkLetConn' (COne a)      = COne . PackedCode <$> mkLet (coerce a)
-    mkLetConn' (CJoin c1 c2) = CJoin <$> mkLetConn' c1 <*> mkLetConn' c2
+-- mkLetConn :: Conn PackedCode cs -> CodeC (Conn PackedCode cs)
+-- mkLetConn CNone = return CNone
+-- mkLetConn (CNE e) = CNE <$> mkLetConn' e
+--   where
+--     mkLetConn' :: NEConn PackedCode cs -> CodeC (NEConn PackedCode cs)
+--     mkLetConn' (COne a)      = COne . PackedCode <$> mkLet (coerce a)
+--     mkLetConn' (CJoin c1 c2) = CJoin <$> mkLetConn' c1 <*> mkLetConn' c2
 
 
 data CodeInteractionStep a b =
@@ -142,8 +147,8 @@ ensureDiffType f = f Proxy Proxy
 mkInteraction :: Proxy a -> Proxy b -> (Delta a -> (Delta b, Interaction (Delta a) (Delta b))) -> Interaction (Delta a) (Delta b)
 mkInteraction _ _ = Interaction
 
-eqProxy :: Proxy a -> Proxy a -> b -> b
-eqProxy _ _ x = x
+-- eqProxy :: Proxy a -> Proxy a -> b -> b
+-- eqProxy _ _ x = x
 
 {-
 Rethinking `mkRTr`.

@@ -14,9 +14,19 @@
 {-# LANGUAGE PolyKinds                 #-}
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE UndecidableInstances      #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 
-module Data.IFqTU where
+
+module Data.IFqTU (
+  IFqTU(..),
+
+  -- * Handling of Uses
+  SBool(..), Extr, Or, MergeUses, mergeTupled,
+  extendEnv, extractEnv, witExtr,
+
+  SafeTail, safeTail
+  ) where
 
 import           Data.Code            (Code, CodeC (..), PackedCode (..),
                                        PackedCodeDelta (..),
@@ -30,7 +40,6 @@ import           Language.Unembedding (LetTerm (..), Term (..), Wit (Wit))
 
 import           Data.Code.Lifting    (WitTypeable (WitTypeable))
 import           Data.JoinList
-import           Data.Typeable        (Typeable)
 import           Prelude              hiding (id, (.))
 import qualified Prelude
 
@@ -202,7 +211,7 @@ instance Term IFqS IFqTU where
 
   weakenTerm (IFqTU tenv sh u m) = IFqTU (ECons WitTypeable tenv) sh (ECons SFalse u) m
 
-  unliftTerm :: forall a b. (Typeable a, Diff a) =>  IFqTU '[a] b -> IFqS a b
+  -- unliftTerm :: forall a b. Diff a =>  IFqTU '[a] b -> IFqS a b
   unliftTerm (IFqTU _ (sh :: Conn WitTypeable cs) (u :: Env SBool us) m) = IFqS sh $ do
     (f, tr) <- m
     let f' a = f (mkEnv u $ PackedCodeDiff a)
@@ -219,7 +228,7 @@ instance Term IFqS IFqTU where
 
 
 instance LetTerm IFqS IFqTU where
-  letTerm :: forall as a b. (Diff a, Typeable a) => IFqTU as a -> IFqTU (a ': as) b -> IFqTU as b
+  letTerm :: forall as a b. Diff a => IFqTU as a -> IFqTU (a ': as) b -> IFqTU as b
   letTerm (IFqTU tenv (sh1 :: Conn WitTypeable cs1) (u1 :: Env SBool us1) m1)
           (IFqTU _    (sh2 :: Conn WitTypeable cs2) (u2 :: Env SBool us2) m2)
     = IFqTU tenv (joinConn sh1 sh2) uf $ do

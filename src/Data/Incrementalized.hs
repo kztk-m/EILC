@@ -6,7 +6,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
 {-# LANGUAGE TypeFamilies        #-}
-module Data.Incrementalized where
+module Data.Incrementalized
+  (
+    IncrementalizedQ(..),
+
+    fromStatelessCode, fromFunctionsCode, compileCode,
+    fromStatelessIdentity, fromFunctionsIdentity, compileIdentity
+  ) where
 
 import           Data.Delta            (Delta)
 import           Data.Interaction      (Interaction)

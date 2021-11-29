@@ -10,18 +10,22 @@
 {-# LANGUAGE TypeApplications          #-}
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE TypeOperators             #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
-module Language.Unembedding.PseudoFunction where
+module Language.Unembedding.PseudoFunction
+  (
+    HasPFun(..), PFunTerm(..),
+    papp,
+
+    -- * Experimental
+    LetPFun(..)
+  ) where
 
 import           Data.Kind            (Constraint, Type)
 import           Language.Unembedding
 
 import           Data.Env
 import           Data.Proxy           (Proxy (Proxy))
--- import           Data.Proxy           (Proxy (..))
-
-data ExTerm cat term as a b = forall c. ExTerm (term as (PFun cat c a b))
-
 
 
 class HasPFun (cat :: k -> k -> Type) where

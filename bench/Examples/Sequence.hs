@@ -63,7 +63,7 @@ import           Data.IF                             (IF)
 
 
 newtype S a = S { unS :: Seq.Seq a }
-  deriving Show
+  deriving newtype Show
   deriving newtype (NFData, Functor, Applicative, Foldable, Monad)
   -- NB: deriving of Traversable via GeneralizedNewtypeDeriving causes an error
 
@@ -85,7 +85,7 @@ instance Show a => Show (DList a) where
   show (DList f) = show (f [])
 
 data JList a = JNil | JAppend !(JList a) !(JList a) | JSingleton !a
-  deriving Functor
+  deriving stock Functor
 
 instance Foldable JList where
   foldMap f js = goNil js
@@ -117,11 +117,11 @@ instance Monoid (JList a) where
   {-# INLINE mempty #-}
 
 newtype instance Delta (S a) = DS (JList (AtomicDelta (S a)))
-  deriving (Semigroup, Monoid)
+  deriving newtype (Semigroup, Monoid)
 
-deriving instance NFData (AtomicDelta (S a)) => NFData (Delta (S a))
+deriving newtype instance NFData (AtomicDelta (S a)) => NFData (Delta (S a))
 
-deriving instance (Show (Delta a) , Show a) => Show (Delta (S a))
+deriving newtype instance (Show (Delta a) , Show a) => Show (Delta (S a))
 
 type DeltaS a = AtomicDelta (S a)
 
@@ -158,7 +158,7 @@ srep i da
   | checkEmpty da = mempty
   | otherwise     = injDelta $ SRep i da
 
-deriving instance (Show (Delta a), Show a) => Show (AtomicDelta (S a))
+deriving stock instance (Show (Delta a), Show a) => Show (AtomicDelta (S a))
 
 
 insSeq :: Int -> Seq.Seq a -> Seq.Seq a -> Seq.Seq a
@@ -297,12 +297,12 @@ infixr 5 @+
 
 
 class MapAPI cat term | term -> cat where
-  mapAPI :: (K cat ~ DiffTypeable, DiffTypeable a, DiffTypeable b, AllIn s DiffTypeable, Monoid (Delta a)) => term (a ': s) b -> term (S a ': s) (S b)
+  mapAPI :: (K cat ~ DiffTypeable, DiffTypeable a, DiffTypeable b, AllIn s DiffTypeable) => term (a ': s) b -> term (S a ': s) (S b)
 
 
 fromPF ::
   forall cat term s (a :: Type) (b :: Type) f .
-  (LetTerm cat term, PFunTerm cat term, K cat ~ DiffTypeable, KK cat ~ Typeable, HasPFun cat,
+  (LetTerm cat term, PFunTerm cat term, K cat ~ DiffTypeable, KK cat ~ Typeable,
    forall (c :: Type). Diff (PFun cat (f c) (S a) (S b)),
    Typeable cat, Typeable f, AllIn s DiffTypeable, DiffTypeable a, DiffTypeable b
   ) =>
@@ -317,7 +317,7 @@ fromPF h e1 e2 =
 
 
 mapTr ::
-  (Diff a, Monoid (Delta a), Diff b)
+  (Diff a, Diff b)
   => (a -> (b, c)) -> (Bool -> Delta a -> c -> (Delta b, c))
   -> Seq c -> Delta (S a) -> (Delta (S b), Seq c )
 mapTr f dfb !cs ds =
@@ -368,7 +368,7 @@ type MapC s cs =
 instance MapAPI IFqS IFqT where
   mapAPI = cMapT
 
-cMapT :: forall s a b. (Monoid (Delta a), Diff a, Typeable a, Diff b, AllIn s DiffTypeable) => IFqT (a ': s) b -> IFqT (S a ': s) (S b)
+cMapT :: forall s a b. (Diff a, Typeable a, Diff b, AllIn s DiffTypeable) => IFqT (a ': s) b -> IFqT (S a ': s) (S b)
 cMapT (IFqT (ECons _ tenv) (sh :: Conn WitTypeable cs) m) = IFqT (ECons WitTypeable tenv) sh' $ do
   (f, tr) <- m
   let
@@ -422,7 +422,7 @@ cMapT (IFqT (ECons _ tenv) (sh :: Conn WitTypeable cs) m) = IFqT (ECons WitTypea
     shA = case witTypeableFlatten sh of { Wit -> CNE (COne WitTypeable) }
 
 mapF :: forall cat term e a b.
-        (MapAPI cat term, LetTerm cat term, App2 cat term e, K cat ~ DiffTypeable, Diff a, Typeable a, Monoid (Delta a), Diff b, Typeable b) => (e a -> e b) -> e (S a) -> e (S b)
+        (MapAPI cat term, LetTerm cat term, App2 cat term e, K cat ~ DiffTypeable, Diff a, Typeable a, Diff b, Typeable b) => (e a -> e b) -> e (S a) -> e (S b)
 mapF = flip (liftSO2 (Proxy @'[ '[], '[a] ]) $ \e1 e2 -> letTerm e1 (mapAPI e2))
 
 
@@ -441,7 +441,7 @@ sndF = lift (sndS (Proxy @a) (Proxy @b))
 cartesian ::
   (IncrementalizedQ cat, MapAPI cat term, LetTerm cat term,
    CodeType cat ~ PackedCode,
-   K cat ~ DiffTypeable, Prod cat a b ~ (a, b), App2 cat term e, Diff a, Typeable a, Monoid (Delta a), Diff b, Typeable b, Monoid (Delta b))
+   K cat ~ DiffTypeable, Prod cat a b ~ (a, b), App2 cat term e, Diff a, Typeable a, Diff b, Typeable b)
   => e (S a) -> e (S b) -> e (S (a, b))
 cartesian as bs =
   concatMapF (\a -> mapF (pair a) bs) as
@@ -449,7 +449,7 @@ cartesian as bs =
     concatMapF f x = concatF (mapF f x)
 
 fMapHOBase ::
-  (Diff a, Diff b, Typeable a) =>
+  (Diff a, Diff b) =>
   FunCache c a b -> (FunCache (Seq c) (S a) (S b), FunCache c a b)
 fMapHOBase (FunCache f df) = (FunCache h dh, FunCache f df)
   where
@@ -460,16 +460,16 @@ fMapHOBase (FunCache f df) = (FunCache h dh, FunCache f df)
       let (db, cs') = iterTr (mapTrChanged f df) das cs
       in (db, cs')
 
-fMapHO :: (Diff a, Diff b, Typeable a) =>
+fMapHO :: (Diff a, Diff b) =>
            PFun IFqS c a b -> (PFun IFqS (Seq c) (S a) (S b), PFun IFqS c a b)
 fMapHO (PFunIFqS h) = PFunIFqS *** PFunIFqS $ fMapHOBase h
 
-fMapHORaw :: (Diff a, Diff b, Typeable a) =>
+fMapHORaw :: (Diff a, Diff b) =>
            PFun IF c a b -> (PFun IF (Seq c) (S a) (S b), PFun IF c a b)
 fMapHORaw (PFunIF h) = PFunIF *** PFunIF $ fMapHOBase h
 
 trMapHOBase ::
-  (Diff a, Diff b, Typeable a) =>
+  (Diff b) =>
   Delta (FunCache c a b) -> FunCache c a b -> (Delta (FunCache (Seq c) (S a) (S b)), FunCache c a b)
 trMapHOBase dft ft | checkEmpty dft = (DeltaFunCache True (\d -> (mempty , d)), ft)
 trMapHOBase dft@(DeltaFunCache _ dfNN) ft = (DeltaFunCache False dfNNMap, ft /+ dft)
@@ -479,12 +479,10 @@ trMapHOBase dft@(DeltaFunCache _ dfNN) ft = (DeltaFunCache False dfNNMap, ft /+ 
       in (db, cs')
 
 
-trMapHO :: (Diff a, Diff b, Typeable a) =>
-           Delta (PFun IFqS c a b) -> PFun IFqS c a b -> (Delta (PFun IFqS (Seq c) (S a) (S b)), PFun IFqS c a b)
+trMapHO :: (Diff b) => Delta (PFun IFqS c a b) -> PFun IFqS c a b -> (Delta (PFun IFqS (Seq c) (S a) (S b)), PFun IFqS c a b)
 trMapHO (DeltaPFunIFqS dft) (PFunIFqS ft) = DeltaPFunIFqS *** PFunIFqS  $ trMapHOBase dft ft
 
-trMapHORaw :: (Diff a, Diff b, Typeable a) =>
-            Delta (PFun IF c a b) -> PFun IF c a b -> (Delta (PFun IF (Seq c) (S a) (S b)), PFun IF c a b)
+trMapHORaw :: (Diff b) => Delta (PFun IF c a b) -> PFun IF c a b -> (Delta (PFun IF (Seq c) (S a) (S b)), PFun IF c a b)
 trMapHORaw (DeltaPFunIF dft) (PFunIF ft) = DeltaPFunIF *** PFunIF  $ trMapHOBase dft ft
 
 
@@ -498,7 +496,7 @@ mapHOCRaw :: (IncrementalizedQ cat, Typeable c, Typeable a, Typeable b, Diff a,
 mapHOCRaw = fromFunctionsIdentity fMapHORaw trMapHORaw
 
 mapHOAPI ::
-  (IncrementalizedQ IFqS, LetTerm IFqS term, PFunTerm IFqS term,
+  (IncrementalizedQ IFqS, PFunTerm IFqS term,
    AllIn s DiffTypeable, DiffTypeable a, DiffTypeable b)
   => term (a ': s) b -> term s (S a) -> term s (S b)
 mapHOAPI = fromPF mapHOC
@@ -512,13 +510,13 @@ mapHOAPIRaw = fromPF mapHOCRaw
 
 mapHO ::
   forall term e a b.
-  (App2 IFqS term e, LetTerm IFqS term, PFunTerm IFqS term, Diff a, Diff b, Typeable a, Typeable b) =>
+  (App2 IFqS term e, PFunTerm IFqS term, Diff a, Diff b, Typeable a, Typeable b) =>
   (e a -> e b) -> e (S a) -> e (S b)
 mapHO = liftSO2 (Proxy @'[ '[a], '[] ]) mapHOAPI
 
 mapHORaw ::
   forall term e a b.
-  (App2 IF term e, LetTerm IF term, PFunTerm IF term, Diff a, Diff b, Typeable a, Typeable b) =>
+  (App2 IF term e, PFunTerm IF term, Diff a, Diff b, Typeable a, Typeable b) =>
   (e a -> e b) -> e (S a) -> e (S b)
 mapHORaw = liftSO2 (Proxy @'[ '[a], '[] ]) mapHOAPIRaw
 
@@ -597,7 +595,7 @@ type TestType =
 type TestCodeType = Code TestType
 
 
-testCode :: (cat ~ IFqS, MapAPI cat term, LetTerm cat term, IncrementalizedQ cat, Term cat term) => Proxy term -> TestCodeType
+testCode :: (cat ~ IFqS, MapAPI cat term, LetTerm cat term, IncrementalizedQ cat) => Proxy term -> TestCodeType
 testCode proxy = compileCode $ runMonoWith proxy $ \xs -> cartesian (fstF xs) (sndF xs)
 
 testCodeHO ::

@@ -32,7 +32,25 @@ common deps
                    
     default-language: Haskell2010
 
-    ghc-options: -Wall
+    ghc-options: 
+                 -Wall
+                 -Wcompat
+                 -Widentities
+                 -Wincomplete-uni-patterns
+                 -Wincomplete-record-updates
+                 -Wredundant-constraints
+                 -Wnoncanonical-monad-instances
+    if impl(ghc >= 8.2)
+      ghc-options:       -fhide-source-paths
+    if impl(ghc >= 8.4)
+      ghc-options:       -Wmissing-export-lists
+                         -Wpartial-fields
+    if impl(ghc >= 8.8)
+      ghc-options:       -Wmissing-deriving-strategies
+                         -fwrite-ide-info
+                         -hiedir=.hie
+    if impl(ghc >= 8.10)
+      ghc-options:       -Wunused-packages                 
 
 library
     import: deps 
@@ -45,7 +63,9 @@ library
         Data.Interaction 
         Data.Incrementalized
         Data.Incrementalized.Function 
+        Data.Incrementalized.Bool
         Data.JoinList 
+        Data.IF
         Data.IFq
         Data.IFqT 
         Data.IFqTU
@@ -84,9 +104,17 @@ benchmark sequence
         ghc-options: 
             -dppr-cols=200 -dsuppress-all -ddump-to-file -ddump-splices -ddump-simpl
 
-test-suite embedding-ilc-test
+-- test-suite embedding-ilc-test
+--     default-language: Haskell2010
+--     type:             exitcode-stdio-1.0
+--     hs-source-dirs:   test
+--     main-is:          MyLibTest.hs
+--     build-depends:    base 
+
+test-suite doctests         
     default-language: Haskell2010
-    type:             exitcode-stdio-1.0
-    hs-source-dirs:   test
-    main-is:          MyLibTest.hs
-    build-depends:    base 
+    type:          exitcode-stdio-1.0
+    hs-source-dirs: test 
+    ghc-options:   -threaded
+    main-is:       doctests.hs
+    build-depends: base, doctest >= 0.8, QuickCheck, embedding-ilc

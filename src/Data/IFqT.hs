@@ -9,7 +9,9 @@
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE TypeOperators             #-}
 
-module Data.IFqT where
+module Data.IFqT (
+  IFqT(..)
+  ) where
 
 import           Data.Code            (Code, CodeC, PackedCode,
                                        PackedCodeDelta (PackedCodeDelta),

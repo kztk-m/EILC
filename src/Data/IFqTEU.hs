@@ -21,8 +21,8 @@ module Data.IFqTEU where
 import           Data.Code            (Code, CodeC (..), PackedCode (..),
                                        PackedCodeDelta (..), mkLet)
 import           Data.Conn            (Conn (..), IsNone (IsNoneFalse), Join,
-                                       NEConn (COne), NETree (NEOne), Tree (NE),
-                                       decompConn, isNone, joinConn)
+                                       NEConn (COne), decompConn, isNone,
+                                       joinConn)
 import           Data.Delta           (Delta, Diff ((/+)), pairDelta)
 import           Data.Env             (Env (..))
 import           Data.IFq             (IFq (..), IFqS (..))
@@ -33,6 +33,8 @@ import           Data.Code.Lifting    (WitTypeable (WitTypeable))
 import           Data.Typeable        (Typeable)
 import           Prelude              hiding (id, (.))
 import qualified Prelude
+
+import           Data.JoinList
 
 data SBool b where
   STrue  :: SBool 'True
@@ -149,10 +151,10 @@ extractEnv (ECons _ as) (ECons SFalse us) = extractEnv as us
 
 
 
-type family CSing (cs :: Tree k) (as :: [k]) (bs :: [Bool]) :: Tree k where
+type family CSing (cs :: JoinList k) (as :: [k]) (bs :: [Bool]) :: JoinList k where
   CSing cs '[] _ = cs
   CSing cs (_ ': _) '[] = cs
-  CSing cs (a ': _) ('True  ': _) = Join ('NE ('NEOne a)) cs
+  CSing cs (a ': _) ('True  ': _) = Join ('JLNonEmpty ('JLSingle a)) cs
   CSing cs (_ ': _) ('False ': _) = cs
 
 type family SafeTail (as :: [k]) :: [k] where
@@ -431,7 +433,7 @@ instance Term IFqS IFqTEUS where
         ENil           -> tr ENil (mkEnv u $ PackedCodeDelta da) cc
         ECons SFalse _ -> tr ENil (mkEnv u $ PackedCodeDelta da) cc
         ECons STrue _  ->
-          case decompConn (IsNoneFalse :: IsNone ('NE ('NEOne a))) (isNone sh) cc of
+          case decompConn (IsNoneFalse :: IsNone ('JLNonEmpty ('JLSingle a))) (isNone sh) cc of
             (CNE (COne (PackedCode a)), c) -> do
               a' <- mkLet [|| $$a /+ $$da ||]
               (db, c') <- tr (ECons (PackedCode a') ENil) (mkEnv u $ PackedCodeDelta da) c
@@ -494,7 +496,7 @@ instance LetTerm IFqS IFqTEUS where
             (db,  c2') <- tr2 (rearrEnv extt2 env) (extd (PackedCodeDelta da) denv) c2
             return (db, joinConn c1' c2')
           ECons STrue _ -> do
-            let (CNE (COne (PackedCode a)), cc) = decompConn (IsNoneFalse :: IsNone ('NE ('NEOne a))) (isNone sh12) c0
+            let (CNE (COne (PackedCode a)), cc) = decompConn (IsNoneFalse :: IsNone ('JLNonEmpty ('JLSingle a))) (isNone sh12) c0
             let (c1, c2) = decompConn (isNone sh1) (isNone sh2) cc
             (da, c1') <- tr1 (rearrEnv extt1 env) (rearrEnv ext1 denv) c1
             a' <- mkLet [|| $$a /+ $$da ||]

@@ -1,16 +1,30 @@
-{-# LANGUAGE DefaultSignatures    #-}
-{-# LANGUAGE DerivingStrategies   #-}
-{-# LANGUAGE DerivingVia          #-}
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE KindSignatures       #-}
-{-# LANGUAGE RankNTypes           #-}
-{-# LANGUAGE ScopedTypeVariables  #-}
-{-# LANGUAGE StandaloneDeriving   #-}
-{-# LANGUAGE TypeApplications     #-}
-{-# LANGUAGE TypeFamilies         #-}
-{-# LANGUAGE UndecidableInstances #-}
-module Data.Delta where
+{-# LANGUAGE DefaultSignatures          #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE DerivingVia                #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE KindSignatures             #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE UndecidableInstances       #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+module Data.Delta (
+  Diff(..), Delta(..), HasAtomicDelta(..), AtomicDelta(..),
+  DiffMinus(..),
+
+  pairDelta, fstDelta, sndDelta,
+  DiffTypeable,
+
+  -- * Some Useful Functions
+  iterTr, iterTrStateless, nilChangeOf,
+
+  -- * Deltas as Collections
+  foldrDelta, foldl'Delta
+  ) where
 
 -- We want to define a class with
 --
@@ -37,7 +51,11 @@ import           Data.Kind             (Type)
 import           Data.Monoid           (Endo (..), Sum (..))
 import           Data.Typeable         (Typeable)
 
-{-# ANN module "HLint: ignore Use tuple-section" #-}
+-- $setup
+-- >>> :set -XGeneralizedNewtypeDeriving -XStandaloneDeriving -XDerivingStrategies -XFlexibleInstances
+-- >>> import Test.QuickCheck.Arbitrary
+-- >>> deriving newtype instance Arbitrary (Delta Integer)
+
 
 -- Stolen from Data.Functor.Utils (hidden package in base)
 (#.) :: Coercible b c => (b -> c) -> (a -> b) -> (a -> c)
@@ -48,7 +66,7 @@ import           Data.Typeable         (Typeable)
 data family Delta (a :: Type) :: Type
 class Monoid (Delta a) => Diff a where
   -- | Applying delta.
-  -- prop> a /+ da /+ da' = a /+ (da <> da')
+  -- prop> a /+ da /+ da' == a /+ (da <> da')
   (/+) :: a -> Delta a -> a
 
   default (/+) :: HasAtomicDelta a => a -> Delta a -> a
@@ -56,12 +74,19 @@ class Monoid (Delta a) => Diff a where
   {-# INLINABLE (/+) #-}
 
   -- | Sound check of emptiness
-  -- prop> checkEmpty da == True ==> a /+ da == a
+  -- That is, if @checkEmpty da@ holds, then @a /+ da@ must be @a@ for any @a@.
+  --
+  -- (The contraposition is used below for automatic testing.)
+  -- prop> a /+ da /= a ==> checkEmpty da == False
   checkEmpty :: Delta a -> Bool
 
   default checkEmpty :: HasAtomicDelta a => Delta a -> Bool
   checkEmpty = foldrDelta (\_ _ -> False) True
   {-# INLINABLE checkEmpty #-}
+
+class Diff a => DiffMinus a where
+  -- | prop> a /+ (a' /- a) == a'
+  (/-) :: a -> a -> Delta a
 
 -- | A type-restricted version of @const mempty@.
 nilChangeOf :: Monoid (Delta a) => a -> Delta a
@@ -108,10 +133,10 @@ iterTr f = unStateWriterLL . monoidMap (StateWriterLL . f)
 {-# INLINABLE iterTr #-}
 
 data instance Delta ()     = UnitDelta
-  deriving Show
+  deriving stock Show
 
 data instance Delta (a, b) = PairDelta (Delta a) (Delta b)
-deriving instance (Show (Delta a), Show (Delta b)) => Show (Delta (a, b))
+deriving stock instance (Show (Delta a), Show (Delta b)) => Show (Delta (a, b))
 
 instance Semigroup (Delta ()) where
   _ <> _ = UnitDelta
@@ -128,12 +153,18 @@ instance Diff () where
   checkEmpty _ = True
   {-# INLINE checkEmpty #-}
 
+instance DiffMinus () where
+  _ /- _ = UnitDelta
+
 instance (Diff a, Diff b) => Diff (a, b) where
   (a, b) /+ PairDelta da db = (a /+ da, b /+ db)
   {-# INLINE (/+) #-}
 
   checkEmpty (PairDelta da db) = checkEmpty da && checkEmpty db
   {-# INLINE checkEmpty #-}
+
+instance (DiffMinus a, DiffMinus b) => DiffMinus (a, b) where
+  (a', b') /- (a, b) = PairDelta (a' /- a) (b' /- b)
 
 instance (Semigroup (Delta a), Semigroup (Delta b)) => Semigroup (Delta (a, b)) where
   PairDelta da1 db1 <> PairDelta da2 db2 = PairDelta (da1 <> da2) (db1 <> db2)
@@ -164,22 +195,14 @@ instance (HasAtomicDelta a, HasAtomicDelta b) => HasAtomicDelta (a, b) where
 
   monoidMap f (PairDelta da db) = monoidMap (f . ADFst) da <> monoidMap (f . ADSnd) db
 
-deriving instance (Show (AtomicDelta a), Show (AtomicDelta b)) => Show (AtomicDelta (a, b))
+deriving stock instance (Show (AtomicDelta a), Show (AtomicDelta b)) => Show (AtomicDelta (a, b))
 
 newtype instance Delta (Identity a) = IdentityDelta (Delta a)
-instance Semigroup (Delta a) => Semigroup (Delta (Identity a)) where
-  IdentityDelta da <> IdentityDelta da' = IdentityDelta (da <> da')
+deriving newtype instance Semigroup (Delta a) => Semigroup (Delta (Identity a))
+deriving newtype instance Monoid    (Delta a) => Monoid (Delta (Identity a))
 
-instance Monoid (Delta a) => Monoid (Delta (Identity a)) where
-  mempty = IdentityDelta mempty
-
-instance Diff a => Diff (Identity a) where
-  (/+) = coerce ((/+) :: a -> Delta a -> a)
-  {-# INLINE (/+) #-}
-
-  checkEmpty = coerce (checkEmpty :: Delta a -> Bool)
-  {-# INLINE checkEmpty #-}
-
+deriving newtype instance Diff a => Diff (Identity a)
+deriving newtype instance DiffMinus a => DiffMinus (Identity a)
 
 instance HasAtomicDelta a => HasAtomicDelta (Identity a) where
   newtype instance AtomicDelta (Identity a) = ADIdentity { runADIdentity :: AtomicDelta a }
@@ -187,7 +210,19 @@ instance HasAtomicDelta a => HasAtomicDelta (Identity a) where
   injDelta (ADIdentity ad) = IdentityDelta (injDelta ad)
   monoidMap f (IdentityDelta da) = monoidMap (f . ADIdentity) da
 
-deriving instance Show (AtomicDelta a) => Show (AtomicDelta (Identity a))
+deriving via AtomicDelta a instance Show (AtomicDelta a) => Show (AtomicDelta (Identity a))
+
+newtype instance Delta Integer = DInteger Integer
+  deriving (Semigroup, Monoid) via (Sum Integer)
+  deriving Num via Integer
+  deriving stock Show
+
+instance Diff Integer where
+  a /+ DInteger da = a + da
+  checkEmpty (DInteger n) = n == 0
+
+instance DiffMinus Integer where
+  a /- b = DInteger (a - b)
 
 newtype instance Delta Int = DInt Int
   deriving (Semigroup, Monoid) via (Sum Int)
@@ -201,6 +236,9 @@ instance Diff Int where
   checkEmpty (DInt n) = n == 0
   {-# INLINE checkEmpty #-}
 
+instance DiffMinus Int where
+  a /- b = DInt (a - b)
+
 newtype instance Delta Word = DWord Int
   deriving (Semigroup, Monoid) via (Sum Int)
   deriving Num via Int
@@ -213,6 +251,10 @@ instance Diff Word where
   checkEmpty (DWord n) = n == 0
   {-# INLINE checkEmpty #-}
 
+instance DiffMinus Word where
+  a /- b = DWord (fromIntegral a - fromIntegral b)
+
+-- | This definition does not care machine errors.
 newtype instance Delta Double = DDouble Double
   deriving (Semigroup, Monoid) via (Sum Double)
   deriving Num via Double
@@ -225,6 +267,36 @@ instance Diff Double where
   checkEmpty (DDouble n) = n == 0
   {-# INLINE checkEmpty #-}
 
+instance DiffMinus Double where
+  a /- b = DDouble (a - b)
+
+-- | @'DiffTypeable' a@ equivalent to @(Diff a, Typeable a)@.
 class (Diff a, Typeable a) => DiffTypeable a
 instance (Diff a, Typeable a) => DiffTypeable a
 
+-- | Delta Booleans.
+data instance Delta Bool = DBKeep | DBNot
+
+instance Semigroup (Delta Bool) where
+  -- | Essentially, '<>' is defined as the exclusive or.
+  DBKeep <> DBKeep = DBKeep
+  DBKeep <> DBNot  = DBNot
+  DBNot  <> DBKeep = DBNot
+  DBNot  <> DBNot  = DBKeep
+  {-# INLINE (<>) #-}
+
+instance Monoid (Delta Bool) where
+  mempty = DBKeep
+  {-# INLINE mempty #-}
+
+instance Diff Bool where
+  x /+ DBKeep = x
+  x /+ DBNot  = not x
+  {-# INLINE (/+) #-}
+
+  checkEmpty DBKeep = True
+  checkEmpty DBNot  = False
+  {-# INLINE checkEmpty #-}
+
+instance DiffMinus Bool where
+  x /- y = if x == y then DBKeep else DBNot

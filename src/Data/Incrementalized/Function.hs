@@ -13,6 +13,7 @@
 {-# LANGUAGE TypeOperators              #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 
 module Data.Incrementalized.Function (
@@ -21,6 +22,8 @@ module Data.Incrementalized.Function (
     toDynFunCache, toDynDeltaFunCache,
     toDynPFunIFqS, toDynDeltaPFunIFqS,
     ensureSameType,
+
+    changeFunction,
     PFun(..), type Delta (..), FunCache(..)) where
 
 import           Data.Dynamic                        (Dynamic, fromDynamic,
@@ -37,8 +40,7 @@ import           Control.Arrow                       (Arrow (second))
 import           Data.Code
 import           Data.Code.Lifting
 import           Data.Conn
-import           Data.Delta                          (Delta (PairDelta),
-                                                      Diff (..), DiffTypeable,
+import           Data.Delta                          (Diff (..), DiffTypeable,
                                                       nilChangeOf)
 import           Data.Env                            (AllIn, Env (..), mapEnv)
 
@@ -56,9 +58,7 @@ import           Data.IFqTU                          (Extr, IFqTU (..),
                                                       SBool (..), SafeTail,
                                                       extendEnv, extractEnv,
                                                       safeTail, witExtr)
-import           Data.Incrementalized                (IncrementalizedQ (CodeType),
-                                                      fromStatelessCode,
-                                                      fromStatelessIdentity)
+import           Data.Incrementalized                (fromStatelessIdentity)
 import           Data.JoinList
 
 {-
@@ -95,14 +95,17 @@ instance Semigroup (Delta b) => Semigroup (Delta (FunCache c a b)) where
 instance Monoid (Delta b) => Monoid (Delta (FunCache c a b)) where
   mempty = DeltaFunCache True $ \c -> (mempty, c)
 
+changeFunction :: Diff b => (a -> (b, c)) -> (c -> (Delta b , c)) -> a -> (b, c)
+changeFunction f df = f'
+  where
+    f' a = let (b, c) = f a
+               (db, c') = df c
+           in (b /+ db, c')
+
+
 instance Diff b => Diff (FunCache c a b) where
   f /+ DeltaFunCache True _ = f
-  FunCache f derive_f /+ DeltaFunCache _ df = FunCache f' derive_f
-    where
-      f' a = let
-              (b, c) = f a
-              (db, c') = df c
-             in (b /+ db, c')
+  FunCache f derive_f /+ DeltaFunCache _ df = FunCache (changeFunction f df) derive_f
 
   checkEmpty (DeltaFunCache b _) = b
 
@@ -112,14 +115,13 @@ type ConnSingle f t = Conn f ('JLNonEmpty ('JLSingle t))
 
 newtype instance Delta (PFun IFqS c a b) = DeltaPFunIFqS (Delta (FunCache c a b))
 
-deriving instance Semigroup (Delta b) => Semigroup (Delta (PFun IFqS c a b))
-deriving instance Monoid (Delta b) => Monoid (Delta (PFun IFqS c a b))
+deriving newtype instance Semigroup (Delta b) => Semigroup (Delta (PFun IFqS c a b))
+deriving newtype instance Monoid (Delta b) => Monoid (Delta (PFun IFqS c a b))
 
 
 pAppImpl ::
   forall as c a b.
-  (AllIn as DiffTypeable, DiffTypeable a, DiffTypeable b, Typeable c) =>
-  Env WitTypeable as ->
+  ( DiffTypeable a, DiffTypeable b, Typeable c) =>Env WitTypeable as ->
   IFqT (PFun IFqS c a b ': a ': as) b
 pAppImpl tenv = IFqT (ECons WitTypeable (ECons WitTypeable tenv)) sh $ do
   let
@@ -230,8 +232,7 @@ instance PFunTerm IFqS IFqT where
 
 pAppImplU ::
   forall as c a b.
-  (AllIn as DiffTypeable, DiffTypeable a, DiffTypeable b, Typeable c) =>
-  Env WitTypeable as ->
+  ( DiffTypeable a, DiffTypeable b, Typeable c) =>Env WitTypeable as ->
   IFqTU (PFun IFqS c a b ': a ': as) b
 pAppImplU tenv = IFqTU (ECons WitTypeable (ECons WitTypeable tenv)) sh (ECons STrue $ ECons STrue ENil) $ do
   let
@@ -266,7 +267,7 @@ pAppImplU tenv = IFqTU (ECons WitTypeable (ECons WitTypeable tenv)) sh (ECons ST
 instance HasPFun IFqS where
   type KK IFqS = Typeable
   newtype PFun IFqS c a b = PFunIFqS (FunCache c a b)
-    deriving Diff
+    deriving newtype Diff
 
 instance PFunTerm IFqS IFqTU where
 
@@ -321,13 +322,13 @@ instance PFunTerm IFqS IFqTU where
 
 newtype instance Delta (PFun IF c a b) = DeltaPFunIF (Delta (FunCache c a b))
 
-deriving instance Semigroup (Delta b) => Semigroup (Delta (PFun IF c a b))
-deriving instance Monoid (Delta b) => Monoid (Delta (PFun IF c a b))
+deriving newtype instance Semigroup (Delta b) => Semigroup (Delta (PFun IF c a b))
+deriving newtype instance Monoid (Delta b) => Monoid (Delta (PFun IF c a b))
 
 instance HasPFun IF where
   type KK IF = Typeable
   newtype PFun IF c a b = PFunIF (FunCache c a b)
-    deriving Diff
+    deriving newtype Diff
 
 instance PFunTerm IF IFT where
   pAbsTerm (IFT (IF (f :: Env PackedDiff (a ': as) -> (b, c)) tr)) k = k $ IFT $ IF f' tr'

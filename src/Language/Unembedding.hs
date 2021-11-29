@@ -42,10 +42,10 @@ module Language.Unembedding (
 import           Data.Env
 import           Data.Kind     (Constraint, Type)
 import           Data.Proxy    (Proxy (..))
-import           Debug.Trace
+-- import           Debug.Trace
 import           Prelude       hiding (id, (.))
 import qualified Prelude
-import           Text.Printf
+-- import           Text.Printf
 import qualified Unsafe.Coerce as Unsafe
 
 
@@ -305,7 +305,7 @@ instance Term cat term => App2 cat term (TSem cat term) where
           --   [trans x0, trans x1, trans x2, ..., trans xn]
           -- where xi refers ith de Bruin index, and trans e = TSem $ \tenv' -> diffT extended tenv' e
           makeArgs :: forall ets ts.
-                      (AllIn (Append ts as) (K cat), AllIn as (K cat), AllIn ets (K cat))
+                      (AllIn (Append ts as) (K cat),  AllIn ets (K cat))
                       => Proxy ets -> Proxy as
                       -> Env Proxy (Append ts as)
                       -> Env Proxy ets
@@ -321,7 +321,7 @@ instance Term cat term => App2 cat term (TSem cat term) where
 
 
 diffT :: (Term cat term, AllIn as (K cat), AllIn bs (K cat), K cat a) => Env Proxy as -> Env Proxy bs -> term as a -> term bs a
-diffT tenv1 tenv2 | trace (printf "Diff: #tenv1 = %d and #tenv2 = %d" (lenEnv tenv1) (lenEnv tenv2)) False = undefined
+-- diffT tenv1 tenv2 | False && trace (printf "Diff: #tenv1 = %d and #tenv2 = %d" (lenEnv tenv1) (lenEnv tenv2)) False = undefined
 diffT tenv1 tenv2 =
   diff' (lenEnv tenv2 - lenEnv tenv1) tenv1 tenv2
   where

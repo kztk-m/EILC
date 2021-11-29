@@ -1,5 +1,10 @@
 {-# LANGUAGE ExistentialQuantification #-}
-module Data.Interaction where
+module Data.Interaction
+  (
+    Interaction(..), InteractionStep(..),
+
+    iterations, toStep, repeatSteps
+  ) where
 
 -- | @'Interaction' a b@ represents a process that repeatedly receives @a@ and returns @b@.
 newtype Interaction a b = Interaction { runInteraction :: a -> (b, Interaction a b) }

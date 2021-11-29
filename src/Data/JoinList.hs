@@ -1,6 +1,7 @@
-{-# LANGUAGE DeriveFoldable    #-}
-{-# LANGUAGE DeriveFunctor     #-}
-{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable     #-}
+{-# LANGUAGE DeriveFunctor      #-}
+{-# LANGUAGE DeriveTraversable  #-}
+{-# LANGUAGE DerivingStrategies #-}
 
 module Data.JoinList
   (
@@ -9,9 +10,9 @@ module Data.JoinList
   where
 
 data JoinListNE a = JLSingle a | JLJoin !(JoinListNE a) !(JoinListNE a)
-  deriving (Functor, Foldable, Traversable)
+  deriving stock (Functor, Foldable, Traversable)
 data JoinList a = JLNil | JLNonEmpty !(JoinListNE a)
-  deriving (Functor, Foldable, Traversable)
+  deriving stock (Functor, Foldable, Traversable)
 
 instance Semigroup (JoinListNE a) where
   (<>) = JLJoin

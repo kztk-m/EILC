@@ -71,19 +71,19 @@ insInner n = [ injDelta $ ADSnd $ mkCons i | i <- ns ]
 --     interleave (x:xs) (y:ys) = x:y:interleave xs ys
 --     mkCons e = SIns 0 (S $ S.singleton e)
 
-tryInc :: (NFData (Delta a), NFData b, NFData (Delta b), Diff b) => (a -> (b, Interaction (Delta a) (Delta b))) -> a -> [Delta a] -> b
+tryInc :: (Diff b) => (a -> (b, Interaction (Delta a) (Delta b))) -> a -> [Delta a] -> b
 tryInc h initial ds =
   let (!res, !it) = h initial
       !dres = iterations it ds
   in foldl' (/+) res dres
 
-tryScratch :: (NFData b, NFData a, Diff a) => (a -> (b, Interaction (Delta a) (Delta b))) -> a -> [Delta a] -> b
+tryScratch :: (NFData b, Diff a) => (a -> (b, Interaction (Delta a) (Delta b))) -> a -> [Delta a] -> b
 tryScratch h = go (fst . h)
   where
     go f a [] = f a
     go f a (da : ds) =
       let !a' = a /+ da
-      in f a' `seq` go f a' ds
+      in f a' `deepseq` go f a' ds
 
 
 

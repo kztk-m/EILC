@@ -6,7 +6,19 @@
 {-# LANGUAGE RankNTypes      #-}
 {-# LANGUAGE TypeFamilies    #-}
 
-module Data.Conn where
+module Data.Conn
+  (
+    Conn(..), NEConn(..),
+
+    -- * Mapping
+    map2Conn,
+
+    -- * Construction, Decomposition
+    singleton, pattern CSingle, Join, joinConn, decompConn,
+
+    -- * Witness of Emptiness
+    IsNone(..), isNone, isNoneAnd
+  ) where
 
 import           Data.JoinList (JoinList (..), JoinListNE (..))
 
@@ -18,8 +30,12 @@ data NEConn f as where
   COne :: !(f a) -> NEConn f ('JLSingle a)
   CJoin :: !(NEConn f as) -> !(NEConn f bs) -> NEConn f ('JLJoin as bs)
 
-pattern CSingle :: f a -> Conn f ('JLNonEmpty ('JLSingle a))
+pattern CSingle :: () => r ~ 'JLNonEmpty ('JLSingle a) => f a -> Conn f r
 pattern CSingle a = CNE (COne a)
+
+
+singleton :: f a -> Conn f ('JLNonEmpty ('JLSingle a))
+singleton = CSingle
 
 map2Conn :: (forall a. f a -> g a) -> Conn f as -> Conn g as
 map2Conn _ CNone     = CNone
