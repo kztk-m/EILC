@@ -234,7 +234,7 @@ instance Cartesian IFq where
 
 instance HasProduct IFq where
   type Unit IFq = ()
-  type Prod IFq a b = (a, b)
+  type Prod IFq = (,)
 
   unitOk _ = Wit
   prodOk _ _ _ = Wit
@@ -269,7 +269,7 @@ instance CategoryK IFqS where
 
 instance HasProduct IFqS where
   type Unit IFqS = ()
-  type Prod IFqS a b = (a, b)
+  type Prod IFqS = (,)
 
   unitOk _ = Wit
   prodOk _ _ _ = Wit

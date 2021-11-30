@@ -70,7 +70,7 @@ data Wit c where
 
 class CategoryK cat => HasProduct (cat :: k -> k -> Type) where
   type Unit cat :: k
-  type Prod cat (a :: k) (b :: k) :: k
+  type Prod cat :: k -> k -> k
 
   unitOk :: Proxy cat -> Wit (K cat (Unit cat))
   prodOk :: Proxy cat -> Proxy a -> Proxy b -> (K cat a, K cat b) => Wit (K cat (Prod cat a b))

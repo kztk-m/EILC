@@ -56,7 +56,7 @@ instance CategoryK IF where
 
 instance HasProduct IF where
   type Unit IF = ()
-  type Prod IF a b = (a, b)
+  type Prod IF = (,)
   unitOk _ = Wit
   prodOk _ _ _ = Wit
 
