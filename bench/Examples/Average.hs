@@ -3,12 +3,14 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
 
+{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE QuantifiedConstraints      #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE UndecidableInstances       #-}
 {-# LANGUAGE UndecidableSuperClasses    #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module Examples.Average where
 
@@ -20,7 +22,7 @@ import           Data.Incrementalized
 import           Data.Proxy           (Proxy (..))
 import           Data.Typeable        (Typeable)
 
-newtype Bag a = Bag [a] deriving (Monoid, Semigroup)
+newtype Bag a = Bag [a] deriving newtype (Monoid, Semigroup)
 
 -- newtype instance AtomicDelta (Bag a) = ADBag (Bag a) -- only insertions are considered
 
@@ -28,7 +30,7 @@ newtype Bag a = Bag [a] deriving (Monoid, Semigroup)
 --   applyAtomicDelta (Bag xs) (coerce -> Bag ys) = Bag (ys ++ xs)
 
 newtype instance Delta (Bag a) = DBag (Bag a)
-  deriving (Semigroup, Monoid)
+  deriving newtype (Semigroup, Monoid)
 
 instance Diff (Bag a) where
   Bag a /+ (DBag (Bag da)) = Bag (da ++ a)
@@ -64,32 +66,31 @@ instance Diff (Bag a) where
 
 
 -- appC :: IFq (Bag Double, Bag Double) (Bag Double)
-appC :: IncrementalizedQ cat => cat  (Bag Double, Bag Double) (Bag Double)
-appC = fromStateless (\z -> [|| case $$z of { (Bag xs, Bag ys) -> Bag (xs ++ ys) } ||])
-                     (\dz -> [|| fstDelta $$dz <> sndDelta $$dz ||])
+appC :: (IncrementalizedQ cat, CodeType cat ~ PackedCode) => cat  (Bag Double, Bag Double) (Bag Double)
+appC = fromStatelessCode (\z -> [|| case $$z of { (Bag xs, Bag ys) -> Bag (xs ++ ys) } ||])
+                         (\dz -> [|| fstDelta $$dz <> sndDelta $$dz ||])
 --                        (\dz -> [|| case $$dz of { (Bag dx, Bag dy) -> Bag (dx ++ dy) } ||])
 
 
 
 -- appF :: App IFq e => e (Bag Double) -> e (Bag Double) -> e (Bag Double)
 appF ::
-  (K cat ~ DiffTypeable, Diff a, Typeable a, Diff b, Typeable b,
-  App cat e, IncrementalizedQ cat,
-  Prod cat a b ~ (Bag Double, Bag Double)) =>
-  e a -> e b -> e (Bag Double)
+  (K cat ~ DiffTypeable, App cat e, IncrementalizedQ cat, CodeType cat ~ PackedCode,
+  Prod cat ~ (,)) =>
+  e (Bag Double) -> e (Bag Double) -> e (Bag Double)
 appF x y = lift appC (pair x y)
 
 cascadeAppS ::
   (K cat ~ DiffTypeable, Diff b, Typeable b,
   LetTerm cat term, App2 cat term e, IncrementalizedQ cat,
-  Prod cat (Bag Double) (Bag Double) ~ (Bag Double, Bag Double)) =>
+  Prod cat ~ (,), CodeType cat ~ PackedCode ) =>
   Int -> e (Bag Double) -> (e (Bag Double) -> e b) -> e b
 cascadeAppS 0 x f = f x
 cascadeAppS n x f = share (appF x x) $ \y -> cascadeAppS (n-1) y f
 
 cascadeAppC ::
   (K cat ~ DiffTypeable, App cat e,
-  IncrementalizedQ cat,
+  IncrementalizedQ cat, CodeType cat ~ PackedCode,
   Prod cat (Bag Double) (Bag Double) ~ (Bag Double, Bag Double)) =>
   Int -> e (Bag Double) -> (e (Bag Double) -> p) -> p
 cascadeAppC 0 x f = f x
@@ -104,31 +105,35 @@ aveDupDup' x = cascadeAppC 4 x ave
 
 ave ::
   (IncrementalizedQ cat, App2 cat t e,
-   DiffTypeable ~ K cat,
+   DiffTypeable ~ K cat, CodeType cat ~ PackedCode,
    Prod cat Double Double ~ (Double, Double))
   => (e (Bag Double) -> e Double)
 ave = \x -> mysum x `mydiv` i2d (len x)
   where
-    lenC :: IncrementalizedQ cat => cat (Bag Double) Int
-    lenC = fromStateless (\a  -> [|| case $$a of { Bag as -> length as } ||])
-                         (\da -> [|| case $$da of { DBag (Bag as) -> DInt (length as) } ||])
+    lenC :: (IncrementalizedQ cat, CodeType cat ~ PackedCode) => cat (Bag Double) Int
+    lenC = fromStatelessCode (\a  -> [|| case $$a of { Bag as -> length as } ||])
+                             (\da -> [|| case $$da of { DBag (Bag as) -> DInt (length as) } ||])
 --                         (\da -> [|| fmap (\x -> case x of { DBag (Bag as) -> DInt (length as) }) $$da ||])
 
-    i2dC :: IncrementalizedQ cat => cat Int Double
-    i2dC = fromStateless (\a  -> [|| fromIntegral $$a :: Double ||])
+    i2dC :: (IncrementalizedQ cat, CodeType cat ~ PackedCode) => cat Int Double
+    i2dC = fromStatelessCode (\a  -> [|| fromIntegral $$a :: Double ||])
     --                      (\da -> [|| fmap (\(DInt x) -> DDouble (Sum $ fromIntegral $ getSum x)) $$da ||])
-                         (\da -> [|| case $$da of { DInt x -> DDouble (fromIntegral x) } ||])
+                            (\da -> [|| case $$da of { DInt x -> DDouble (fromIntegral x) } ||])
     -- (\da -> [|| Sum (fromIntegral (getSum $$da) :: Double) ||])
 
-    sumC :: IncrementalizedQ cat => cat (Bag Double) Double
-    sumC = fromStateless (\a  -> [|| case $$a of { Bag as -> sum as } ||])
-                         (\da -> [|| case $$da of { DBag (Bag as) -> DDouble (sum as) } ||])
+    sumC :: (IncrementalizedQ cat, CodeType cat ~ PackedCode) => cat (Bag Double) Double
+    sumC = fromStatelessCode (\a  -> [|| case $$a of { Bag as -> sum as } ||])
+                             (\da -> [|| case $$da of { DBag (Bag as) -> DDouble (sum as) } ||])
 --                         (\da -> [|| fmap (\ (DBag (Bag as)) -> DDouble (sum as) ) $$da ||])
 --                            (\da -> [|| case $$da of { Bag as' -> Sum (sum as') } ||])
 
-    divC :: IncrementalizedQ cat => cat (Double, Double) Double
-    divC = fromD (\z -> [|| uncurry (/) $$z ||])
-                 (\z dz -> [|| let {(x, y) = $$z; dx = fstDelta $$dz ; dy = sndDelta $$dz } in DDouble $ (x /+ dx) / (y /+ dy) - x / y ||])
+    divC :: (IncrementalizedQ cat, CodeType cat ~ PackedCode) => cat (Double, Double) Double
+    divC =
+      fromFunctionsCode [|| \(x,y) -> (x / y, (x,y)) ||]
+                        [|| \(PairDelta dx dy) (x,y)  -> (DDouble $ (x /+ dx) / (y /+ dy) - x / y, (x /+ dx, y /+ dy)) ||]
+
+      -- fromD (\z -> [|| uncurry (/) $$z ||])
+      -- (\z dz -> [|| let {(x, y) = $$z; dx = fstDelta $$dz ; dy = sndDelta $$dz } in DDouble $ (x /+ dx) / (y /+ dy) - x / y ||])
 --                    (\z dz -> [|| let {(x, y) = $$z ; (dx, dy) = $$dz} in Sum $ (x /+ dx) / (y /+ dy) - x / y ||])
 
     len = lift lenC
@@ -139,34 +144,6 @@ ave = \x -> mysum x `mydiv` i2d (len x)
 
 runMonoWith :: (Term cat term, K cat a, K cat b) => Proxy term -> (TSem cat term a -> TSem cat term b) -> cat a b
 runMonoWith _ = runMono
-
-
--- sumD :: Bag Double -> Delta (Bag Double) -> Delta Double
--- sumD _ (Bag xs) = Sum $ Prelude.sum xs
-
--- lenD :: Bag Double -> Delta (Bag Double) -> Delta Int
--- lenD _ (Bag xs) = Sum $ length xs
-
--- i2dD :: Int -> Delta Int -> Delta Double
--- i2dD _ d = Sum $ fromIntegral $ getSum d
-
--- divD :: (Double, Double) -> (Delta Double, Delta Double) -> Delta Double
--- divD (x, y) (dx, dy) = Sum $ (x /+ dx) / (y /+ dy) - x / y
-
--- sumF :: Incr e => e (Bag Double) -> e Double
--- sumF = liftI (\(Bag xs) -> sum xs) sumD
-
--- lenF :: Incr e => e (Bag Double) -> e Int
--- lenF = liftI (\(Bag xs) -> length xs) lenD
-
--- i2dF :: Incr e => e Int -> e Double
--- i2dF = liftI fromIntegral i2dD
-
--- divF :: Incr e => e (Double, Double) -> e Double
--- divF = liftI (uncurry (/)) divD
-
--- aveD :: Incr e => e (Bag Double) -> e Double
--- aveD x = shareI x $ \y -> divF (pairI (sumF y) (i2dF (lenF y)))
 
 
 -- >>> let f = $$(runIFq (runMonoWith (Proxy :: Proxy IFqT) ave))
