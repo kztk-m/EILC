@@ -14,6 +14,8 @@
 {-# LANGUAGE PolyKinds                 #-}
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE UndecidableInstances      #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 
 module Data.IFqTEU where
@@ -25,7 +27,7 @@ import           Data.Conn            (Conn (..), IsNone (IsNoneFalse), Join,
                                        joinConn)
 import           Data.Delta           (Delta, Diff ((/+)), pairDelta)
 import           Data.Env             (Env (..))
-import           Data.IFq             (IFq (..), IFqS (..))
+import           Data.IFq             (IFqS (..))
 import           Data.Proxy           (Proxy (Proxy))
 import           Language.Unembedding (LetTerm (..), Term (..))
 
