@@ -1,6 +1,8 @@
 .stack-work
 .vscode
 .dir-locals.el
+/.hie 
+
 /dist-newstyle
 stack.yaml.lock
 *.prof
