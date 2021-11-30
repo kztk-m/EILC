@@ -340,7 +340,7 @@ runMonoWith _ = runMono
 
 
 run :: (Term cat term, K cat a, K cat b) => (forall e. App2 cat term e => e a -> e b) -> cat a b
-run = runMono
+run f = runMono f
 
 runWith :: (Term cat term, K cat a, K cat b) => Proxy term -> (forall e. App2 cat term e => e a -> e b) -> cat a b
-runWith _ = runMono
+runWith _ f = runMono f

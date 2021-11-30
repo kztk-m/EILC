@@ -6,6 +6,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs               #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE QuantifiedConstraints      #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TemplateHaskell            #-}
@@ -13,6 +14,7 @@
 {-# LANGUAGE TypeOperators              #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 
@@ -22,6 +24,7 @@ module Data.Incrementalized.Function (
     toDynFunCache, toDynDeltaFunCache,
     toDynPFunIFqS, toDynDeltaPFunIFqS,
     ensureSameType,
+    IsClosed(..), fromPFun,
 
     changeFunction,
     PFun(..), type Delta (..), FunCache(..)) where
@@ -60,6 +63,7 @@ import           Data.IFqTU                          (Extr, IFqTU (..),
                                                       safeTail, witExtr)
 import           Data.Incrementalized                (fromStatelessIdentity)
 import           Data.JoinList
+import           Data.Kind                           (Type)
 
 {-
 See ./note/meeting_doc_Nov_2021.
@@ -80,7 +84,13 @@ allEmptyDelta (ECons (PackedCodeDelta da) das)  = [|| checkEmpty $$da && $$(allE
 ensureSameType :: a -> a -> ()
 ensureSameType _ _ = ()
 
-data FunCache c a b = FunCache !(a -> (b, c)) !(Delta a -> c -> (Delta b, c))
+data IsClosed = Closed | Open
+
+-- FIXME: make use of IsSingleton
+data FunCache c a b where
+  FunCache     :: !IsClosed -> !(a -> (b, c)) -> !(Delta a -> c -> (Delta b, c)) -> FunCache c a b
+
+
 data instance (Delta (FunCache c a b)) =
   DeltaFunCache !Bool !(c -> (Delta b, c))
 
@@ -105,7 +115,9 @@ changeFunction f df = f'
 
 instance Diff b => Diff (FunCache c a b) where
   f /+ DeltaFunCache True _ = f
-  FunCache f derive_f /+ DeltaFunCache _ df = FunCache (changeFunction f df) derive_f
+  FunCache Closed f deriv_f /+ _ = FunCache Closed f deriv_f
+  FunCache ws f deriv_f /+ DeltaFunCache _ df =
+    FunCache ws (changeFunction f df) deriv_f
 
   checkEmpty (DeltaFunCache b _) = b
 
@@ -129,7 +141,7 @@ pAppImpl tenv = IFqT (ECons WitTypeable (ECons WitTypeable tenv)) sh $ do
           -> CodeC (Code b, ConnSingle PackedCode (c, Delta a -> c -> (Delta b, c)))
     ff (ECons (PackedCodeDiff pf) (ECons (PackedCodeDiff a) _)) = do
       (b, cc) <- CodeC $ \k -> [||
-          let PFunIFqS (FunCache f deriv_f) = $$pf
+          let PFunIFqS (FunCache _ f deriv_f) = $$pf
               (b, c) = f $$a
           in $$(k ([|| b ||], [|| (c, deriv_f) ||]))
         ||]
@@ -157,7 +169,7 @@ pAppImpl tenv = IFqT (ECons WitTypeable (ECons WitTypeable tenv)) sh $ do
 -- fromDyn = fromJust Prelude.. fromDynamic
 
 toDynFunCache :: Typeable c => FunCache c a b -> FunCache Dynamic a b
-toDynFunCache (FunCache f deriv_f) = FunCache (second toDyn . f) (\da d -> second toDyn $ deriv_f da (fromJust $ fromDynamic d))
+toDynFunCache (FunCache isc f deriv_f) = FunCache isc (second toDyn . f) (\da d -> second toDyn $ deriv_f da (fromJust $ fromDynamic d))
 
 toDynPFunIFqS :: forall c a b. Typeable c => PFun IFqS c a b -> PFun IFqS Dynamic a b
 toDynPFunIFqS = coerce (toDynFunCache :: FunCache c a b -> FunCache Dynamic a b)
@@ -184,6 +196,10 @@ toDynIF = fromStatelessIdentity (coerce (toDynFunCache :: FunCache c a b -> FunC
 asType :: a -> a -> a
 asType a _ = a
 
+mkIsClosed :: Env proxy as -> Code IsClosed
+mkIsClosed ENil        = [|| Closed ||]
+mkIsClosed (ECons _ _) = [|| Open ||]
+
 instance PFunTerm IFqS IFqT where
   pAbsTerm (IFqT (ECons _ tenv) (sh :: Conn WitTypeable cs) m) kk = case wit of
     Wit -> kk $ IFqT tenv CNone $ do
@@ -199,7 +215,7 @@ instance PFunTerm IFqS IFqT where
         let
           h ::  Env PackedCodeDiff as -> Code (PFun IFqS (Env Identity (Flatten cs)) a b)
           h env =
-            [|| PFunIFqS $ FunCache
+            [|| PFunIFqS $ FunCache $$(mkIsClosed tenv)
               (\a -> $$(toCode $ do
                         (b, cs) <- f (ECons (PackedCodeDiff [|| a ||]) env)
                         return [|| ($$b, $$(conn2cenv cs) ) ||]))
@@ -240,7 +256,7 @@ pAppImplU tenv = IFqTU (ECons WitTypeable (ECons WitTypeable tenv)) sh (ECons ST
           -> CodeC (Code b, ConnSingle PackedCode (c, Delta a -> c -> (Delta b, c)))
     ff (ECons (PackedCodeDiff pf) (ECons (PackedCodeDiff a) _)) = do
       (b, cc) <- CodeC $ \k -> [||
-          let PFunIFqS (FunCache f deriv_f) = $$pf
+          let PFunIFqS (FunCache _ f deriv_f) = $$pf
               (b, c) = f $$a
           in $$(k ([|| b ||], [|| (c, deriv_f) ||]))
         ||]
@@ -269,6 +285,7 @@ instance HasPFun IFqS where
   newtype PFun IFqS c a b = PFunIFqS (FunCache c a b)
     deriving newtype Diff
 
+
 instance PFunTerm IFqS IFqTU where
 
   pAbsTerm (IFqTU (ECons _ (tenv :: Env WitTypeable as)) (sh :: Conn WitTypeable cs) (u :: Env SBool us) m) kk = case (wit, wit2) of
@@ -283,7 +300,7 @@ instance PFunTerm IFqS IFqTU where
           ||]
       let h ::  Env PackedCodeDiff (Extr as (SafeTail us)) -> Code (PFun IFqS (Env Identity (Flatten cs)) a b)
           h env =
-            [|| PFunIFqS $ FunCache
+            [|| PFunIFqS $ FunCache $$(mkIsClosed $ extractEnv tenv u')
               (\a -> $$(toCode $ do
                         (b, cs) <- f (extendEnv tenv u (PackedCodeDiff [|| a ||]) env)
                         return [|| ($$b, $$(conn2cenv cs) ) ||]))
@@ -334,7 +351,7 @@ instance PFunTerm IF IFT where
   pAbsTerm (IFT (IF (f :: Env PackedDiff (a ': as) -> (b, c)) tr)) k = k $ IFT $ IF f' tr'
     where
       f' :: Env PackedDiff as -> (PFun IF c a b, ())
-      f' env = (PFunIF $ FunCache
+      f' env = (PFunIF $ FunCache (case env of { ENil -> Closed; _ -> Open})
                  (\a -> f (ECons (PackedDiff a) env))
                  (\da c -> if checkEmpty da then (mempty, c) else tr (DCons da DMEmpty) c), ())
 
@@ -351,9 +368,10 @@ instance PFunTerm IF IFT where
       appOp :: (DiffTypeable b, DiffTypeable a, Typeable c) => IF (PFun IF c a b , a) b
       appOp = IF f tr
         where
-          f (PFunIF (FunCache h trH), a) =
+          f (PFunIF (FunCache _ h trH), a) =
             let (b, c) = h a
             in (b, (c, trH))
+
 
           tr (PairDelta (DeltaPFunIF (DeltaFunCache b dh)) da) (c, trH) =
             let (db1, c') = dh c
@@ -475,3 +493,18 @@ instance FunTerm IF IFT where
 let h = $$( compile $ (runMonoWith (Proxy :: Proxy IFqT) problematic :: IFqS Int Int))
 -}
 
+
+fromPFun ::
+  forall cat term s (a :: Type) (b :: Type) f aa bb .
+  (PFunTerm cat term, K cat ~ DiffTypeable, KK cat ~ Typeable,
+   forall (c :: Type). Diff (PFun cat (f c) aa bb),
+   Typeable cat, Typeable f, AllIn s DiffTypeable, DiffTypeable a, DiffTypeable b, DiffTypeable aa, DiffTypeable bb
+  ) =>
+  -- Skolem function f is used to represent existential quantification in this scope.
+  (forall (c :: Type). Typeable c => cat (PFun cat c a b) (PFun cat (f c) aa bb))
+  -> term (a ': s) b
+  -> term s aa
+  -> term s bb
+fromPFun h e1 e2 =
+  pAbsTerm e1 $ \e1' ->
+  pAppTerm (mapTerm h e1') e2

@@ -65,7 +65,7 @@ type Lazy cat c a = PFun cat c () a
 delay :: forall cat term s a r.
          (K cat a, K cat (), AllIn s (K cat), PFunTerm cat term) =>
          term s a -> (forall c. KK cat c => term s (Lazy cat c a) -> r) -> r
-delay t = pAbsTerm (weakenTerm t :: term (() ': s) a)
+delay t k = pAbsTerm (weakenTerm t :: term (() ': s) a) k
 
 type IFCache c1 c2 a =
   'JLNonEmpty ('JLSingle (a, Either c1 c2, () -> (a, c1), () -> (a, c2)))
@@ -86,8 +86,8 @@ ifObliviousC tenv = IFqT (ECons WitTypeable $ ECons WitTypeable $ ECons WitTypea
          -> CodeC (Code a, Conn PackedCode (IFCache c1 c2 a))
     f (ECons (PackedCodeDiff b) (ECons (PackedCodeDiff pf1) (ECons (PackedCodeDiff pf2) _))) = CodeC $ \k ->
       [||
-        let PFunIFqS (FunCache f1 _) = $$pf1
-            PFunIFqS (FunCache f2 _) = $$pf2
+        let PFunIFqS (FunCache _ f1 _) = $$pf1
+            PFunIFqS (FunCache _ f2 _) = $$pf2
             (a, c) = if $$b then
                        let (res, c0) = f1 ()
                        in (res, Left c0)
@@ -138,8 +138,8 @@ ifObliviousCU tenv = IFqTU (ECons WitTypeable $ ECons WitTypeable $ ECons WitTyp
          -> CodeC (Code a, Conn PackedCode (IFCache c1 c2 a))
     f (ECons (PackedCodeDiff b) (ECons (PackedCodeDiff pf1) (ECons (PackedCodeDiff pf2) ENil))) = CodeC $ \k ->
       [||
-        let PFunIFqS (FunCache f1 _) = $$pf1
-            PFunIFqS (FunCache f2 _) = $$pf2
+        let PFunIFqS (FunCache _ f1 _) = $$pf1
+            PFunIFqS (FunCache _ f2 _) = $$pf2
             (a, c) = if $$b then
                        let (res, c0) = f1 ()
                        in (res, Left c0)

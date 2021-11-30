@@ -8,7 +8,7 @@
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TypeFamilies               #-}
 
-module Data.Inrementalized.Group
+module Data.Incrementalized.Group
    (
      FromMonoid(..), Delta(..)
    ) where
@@ -45,21 +45,21 @@ instance (Eq a, Monoid a) => Diff (FromMonoid a) where
   -- | Hoping that equivalence check with mempty is rather light-weight.
   checkEmpty a = mempty == coerceVia getDeltaFromMonoid a
 
-instance (Eq a, Abelian a) => DiffMinus (FromMonoid a) where
+instance (Eq a, Group a) => DiffMinus (FromMonoid a) where
   -- |
-  -- See below to check why the commutativy matters here.
+  -- @a /- b@ is implemented as @invert b <> a@.
   --
   -- @
-  -- FromMonoid b /+ FromMonoid a /- FromMonoid b
+  -- FromMonoid b /+ (FromMonoid a /- FromMonoid b)
   -- = { by definition }
-  --   b <> a <> invert b
-  -- = { commutativity & associativity }
+  --   b <> invert b <> a
+  -- = { associativity }
   --   (b <> invert b) <> a
   -- = { inverse element }
   --   mempty <> a
   -- = { monoid law }
   --   a
   -- @
-  a /- b = coerceVia DeltaFromMonoid (coerce a <> invert (coerce b))
+  a /- b = coerceVia DeltaFromMonoid (invert (coerce b) <> coerce a)
 
 

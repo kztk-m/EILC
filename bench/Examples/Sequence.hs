@@ -20,6 +20,7 @@
 {-# LANGUAGE TypeFamilyDependencies     #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
+{-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
 
 module Examples.Sequence (
   S(..), type AtomicDelta(..),
@@ -451,7 +452,7 @@ cartesian as bs =
 fMapHOBase ::
   (Diff a, Diff b) =>
   FunCache c a b -> (FunCache (Seq c) (S a) (S b), FunCache c a b)
-fMapHOBase (FunCache f df) = (FunCache h dh, FunCache f df)
+fMapHOBase (FunCache ws f df) = (FunCache ws h dh, FunCache ws f df)
   where
     h (S as) =
       let (bs, cs) = Seq.unzip $ fmap f as
