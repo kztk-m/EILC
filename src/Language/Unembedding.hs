@@ -338,9 +338,10 @@ runMono f = unliftTerm $ runTSem (f $ TSem $ \tenv -> diffT tenv1 tenv $ var0Ter
 runMonoWith :: (Term cat term, K cat a, K cat b) => Proxy term ->  (TSem cat term a -> TSem cat term b) -> cat a b
 runMonoWith _ = runMono
 
-
+{-# ANN run "hlint: ignore Eta reduce" #-}
 run :: (Term cat term, K cat a, K cat b) => (forall e. App2 cat term e => e a -> e b) -> cat a b
 run f = runMono f
 
+{-# ANN runWith "hlint: ignore Eta reduce" #-}
 runWith :: (Term cat term, K cat a, K cat b) => Proxy term -> (forall e. App2 cat term e => e a -> e b) -> cat a b
 runWith _ f = runMono f

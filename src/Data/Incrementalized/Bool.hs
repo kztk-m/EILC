@@ -62,6 +62,7 @@ import           Data.Incrementalized.Function
 
 type Lazy cat c a = PFun cat c () a
 
+{-# ANN delay "hlint: ignore Eta reduce" #-}
 delay :: forall cat term s a r.
          (K cat a, K cat (), AllIn s (K cat), PFunTerm cat term) =>
          term s a -> (forall c. KK cat c => term s (Lazy cat c a) -> r) -> r
