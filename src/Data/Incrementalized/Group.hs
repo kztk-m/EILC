@@ -3,6 +3,7 @@
 {-# LANGUAGE DeriveTraversable          #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE DerivingVia                #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StandaloneDeriving         #-}
@@ -10,12 +11,28 @@
 
 module Data.Incrementalized.Group
    (
-     FromMonoid(..), Delta(..)
+     FromMonoid(..), Delta(..),
+     GroupChangeWithReplace(..),
+
+     DiffGroupReplace(..)
    ) where
 
 import           Data.Coerce (Coercible, coerce)
 import           Data.Delta
 import           Data.Group
+
+
+-- | @'GroupChangeWithReplace' a@ is a Delta type made from a group a.
+--   Notice that this itself does not form a group, as there is no inverse element for 'Replace a'.
+data GroupChangeWithReplace a = GroupChange !a | Replace !a
+
+instance Semigroup a => Semigroup (GroupChangeWithReplace a) where
+  Replace a <> GroupChange b     = Replace (a <> b)
+  GroupChange a <> GroupChange b = GroupChange (a <> b)
+  _ <> Replace a                 = Replace a
+
+instance Monoid a => Monoid (GroupChangeWithReplace a) where
+  mempty = GroupChange mempty
 
 -- A newtype wrapper
 newtype FromMonoid a = FromMonoid { getMonoid :: a }
@@ -26,40 +43,29 @@ instance Applicative FromMonoid where
   pure = coerce
   (<*>) = (coerce :: ((a -> b) -> a -> b) -> (FromMonoid (a -> b) -> FromMonoid a -> FromMonoid b)) ($)
 
-newtype instance Delta (FromMonoid a) = DeltaFromMonoid { getDeltaFromMonoid :: a }
-  deriving newtype (Semigroup, Monoid, Group, Eq, Ord, Enum, Num)
-  deriving stock Show
+newtype instance Delta (FromMonoid a) = DeltaFromMonoid { getGroupChangeWithReplace :: GroupChangeWithReplace a }
+  deriving newtype (Semigroup, Monoid)
+
+instance (Eq a, Monoid a) => Diff (FromMonoid a) where
+  a /+ (DeltaFromMonoid (GroupChange b)) = coerceVia FromMonoid (coerce a <> b)
+  _ /+ (DeltaFromMonoid (Replace b))     = coerceVia FromMonoid b
+
+  checkEmpty (DeltaFromMonoid (GroupChange a)) = mempty == a
+  checkEmpty (DeltaFromMonoid (Replace _))     = False
+
+instance (Eq a, Group a) => DiffMinus (FromMonoid a) where
+  FromMonoid a /- FromMonoid b = coerceVia DeltaFromMonoid $ GroupChange $ invert b <> a
+
+instance (Eq a, Monoid a) => DiffReplace (FromMonoid a) where
+  replaceTo = coerceVia DeltaFromMonoid . Replace . coerceVia getMonoid
 
 coerceVia :: Coercible a b => (a -> b) -> a -> b
 coerceVia _ = coerce
 {-# INLINE coerceVia #-}
 
-instance (Eq a, Monoid a) => Diff (FromMonoid a) where
-  -- | (/+) is defined by (<>). Then, it is rather obvious for
-  --   the following properties to hold.
-  --
-  --      - @a /+ da1 /+ da2 = a /+ (da1 <> da2)@
-  --      - @a /+ mempty = a@
-  a /+ b = coerceVia FromMonoid (coerce a <> coerce b)
-
-  -- | Hoping that equivalence check with mempty is rather light-weight.
-  checkEmpty a = mempty == coerceVia getDeltaFromMonoid a
-
-instance (Eq a, Group a) => DiffMinus (FromMonoid a) where
-  -- |
-  -- @a /- b@ is implemented as @invert b <> a@.
-  --
-  -- @
-  -- FromMonoid b /+ (FromMonoid a /- FromMonoid b)
-  -- = { by definition }
-  --   b <> invert b <> a
-  -- = { associativity }
-  --   (b <> invert b) <> a
-  -- = { inverse element }
-  --   mempty <> a
-  -- = { monoid law }
-  --   a
-  -- @
-  a /- b = coerceVia DeltaFromMonoid (invert (coerce b) <> coerce a)
-
+class (Coercible (Delta a) (GroupChangeWithReplace a),
+       Coercible (GroupChangeWithReplace a) (Delta a),
+       DiffReplace a, Monoid a) => DiffGroupReplace a where
+  toGroupDelta :: a -> Delta a
+  toGroupDelta a = coerce (GroupChange a)
 

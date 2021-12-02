@@ -495,13 +495,14 @@ let h = $$( compile $ (runMonoWith (Proxy :: Proxy IFqT) problematic :: IFqS Int
 
 
 fromPFun ::
-  forall cat term s (a :: Type) (b :: Type) f aa bb .
-  (PFunTerm cat term, K cat ~ DiffTypeable, KK cat ~ Typeable,
-   forall (c :: Type). Diff (PFun cat (f c) aa bb),
-   Typeable cat, Typeable f, AllIn s DiffTypeable, DiffTypeable a, DiffTypeable b, DiffTypeable aa, DiffTypeable bb
-  ) =>
+  forall {- cat -} term s (a :: Type) (b :: Type) aa bb f.
+  -- (PFunTerm cat term, K cat ~ DiffTypeable, KK cat ~ Typeable,
+  --  forall (c :: Type). Diff (PFun cat (f c) aa bb),
+  --  Typeable cat, Typeable f, AllIn s DiffTypeable, DiffTypeable a, DiffTypeable b, DiffTypeable aa, DiffTypeable bb
+  -- ) =>
+  (PFunTerm IFqS term, AllIn s DiffTypeable, DiffTypeable a, DiffTypeable b, DiffTypeable aa, DiffTypeable bb, Typeable f) =>
   -- Skolem function f is used to represent existential quantification in this scope.
-  (forall (c :: Type). Typeable c => cat (PFun cat c a b) (PFun cat (f c) aa bb))
+  (forall (c :: Type). Typeable c => IFqS (PFun IFqS c a b) (PFun IFqS (f c) aa bb))
   -> term (a ': s) b
   -> term s aa
   -> term s bb

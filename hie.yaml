@@ -5,4 +5,4 @@ cradle:
     - path: "bench" 
       component: "embedding-ilc:bench:sequence"     
     - path: "test"
-      component: "embedding-ilc:test:doctests"
+      component: "embedding-ilc:test:embedding-ilc-test-num"

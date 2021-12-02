@@ -14,7 +14,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Data.Delta (
   Diff(..), Delta(..), HasAtomicDelta(..), AtomicDelta(..),
-  DiffMinus(..),
+  DiffMinus(..), DiffReplace(..),
 
   pairDelta, fstDelta, sndDelta,
   DiffTypeable,
@@ -69,9 +69,9 @@ class Monoid (Delta a) => Diff a where
   -- prop> a /+ da /+ da' == a /+ (da <> da')
   (/+) :: a -> Delta a -> a
 
-  default (/+) :: HasAtomicDelta a => a -> Delta a -> a
-  a /+ da = foldl'Delta applyAtomicDelta a da
-  {-# INLINABLE (/+) #-}
+  -- default (/+) :: HasAtomicDelta a => a -> Delta a -> a
+  -- a /+ da = foldl'Delta applyAtomicDelta a da
+  -- {-# INLINABLE (/+) #-}
 
   -- | Sound check of emptiness
   -- That is, if @checkEmpty da@ holds, then @a /+ da@ must be @a@ for any @a@.
@@ -80,13 +80,17 @@ class Monoid (Delta a) => Diff a where
   -- prop> a /+ da /= a ==> checkEmpty da == False
   checkEmpty :: Delta a -> Bool
 
-  default checkEmpty :: HasAtomicDelta a => Delta a -> Bool
-  checkEmpty = foldrDelta (\_ _ -> False) True
-  {-# INLINABLE checkEmpty #-}
+  -- default checkEmpty :: HasAtomicDelta a => Delta a -> Bool
+  -- checkEmpty = foldrDelta (\_ _ -> False) True
+  -- {-# INLINABLE checkEmpty #-}
 
 class Diff a => DiffMinus a where
   -- | prop> a /+ (a' /- a) == a'
   (/-) :: a -> a -> Delta a
+
+class Diff a => DiffReplace a where
+  -- | prop> a /+ replaceTo b == b
+  replaceTo :: a -> Delta a
 
 -- | A type-restricted version of @const mempty@.
 nilChangeOf :: Monoid (Delta a) => a -> Delta a
@@ -156,6 +160,9 @@ instance Diff () where
 instance DiffMinus () where
   _ /- _ = UnitDelta
 
+instance DiffReplace () where
+  replaceTo _ = UnitDelta
+
 instance (Diff a, Diff b) => Diff (a, b) where
   (a, b) /+ PairDelta da db = (a /+ da, b /+ db)
   {-# INLINE (/+) #-}
@@ -165,6 +172,9 @@ instance (Diff a, Diff b) => Diff (a, b) where
 
 instance (DiffMinus a, DiffMinus b) => DiffMinus (a, b) where
   (a', b') /- (a, b) = PairDelta (a' /- a) (b' /- b)
+
+instance (DiffReplace a, DiffReplace b) => DiffReplace (a, b) where
+  replaceTo (a, b) = PairDelta (replaceTo a) (replaceTo b)
 
 instance (Semigroup (Delta a), Semigroup (Delta b)) => Semigroup (Delta (a, b)) where
   PairDelta da1 db1 <> PairDelta da2 db2 = PairDelta (da1 <> da2) (db1 <> db2)
@@ -243,6 +253,15 @@ newtype instance Delta Word = DWord Int
   deriving (Semigroup, Monoid) via (Sum Int)
   deriving Num via Int
   deriving stock Show
+
+newtype instance Delta (Sum n) = DeltaSum { getDeltaSum :: Delta n }
+
+deriving newtype instance Semigroup (Delta n) => Semigroup (Delta (Sum n))
+deriving newtype instance Monoid    (Delta n) => Monoid    (Delta (Sum n))
+
+deriving via n instance Diff n => Diff (Sum n)
+deriving via n instance DiffMinus n => DiffMinus (Sum n)
+deriving via n instance DiffReplace n => DiffReplace (Sum n)
 
 instance Diff Word where
   a /+ DWord da = a + fromIntegral da
