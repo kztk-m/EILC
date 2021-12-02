@@ -14,7 +14,7 @@
 
 module Data.Env
   (
-    Env(..), pattern (:>),
+    Env(..),
 
     -- * Operations
     mapEnv, traverseEnv, headEnv, tailEnv,
@@ -34,7 +34,7 @@ import           Data.Kind (Constraint, Type)
 
 data Env (f :: k -> Type) (as :: [k]) where
   ENil  :: Env f '[]
-  ECons :: f a -> Env f as -> Env f (a ': as)
+  ECons :: !(f a) -> !(Env f as) -> Env f (a ': as)
 
 type family AllInF f as c :: Constraint where
   AllInF f '[] c = ()
@@ -42,10 +42,10 @@ type family AllInF f as c :: Constraint where
 
 deriving stock instance (AllInF f as Show) => Show (Env f as)
 
-pattern (:>) :: () => (rs ~ (a : as)) => f a -> Env f as -> Env f rs
-pattern a :> as = ECons a as
+-- pattern (:>) :: () => (rs ~ (a : as)) => f a -> Env f as -> Env f rs
+-- pattern a :> as = ECons a as
 
-infixr 5 :>
+-- infixr 5 :>
 
 type family AllIn as c :: Constraint where
   AllIn '[] c = ()
