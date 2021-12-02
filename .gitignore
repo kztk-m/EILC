@@ -3,6 +3,8 @@
 .dir-locals.el
 /.hie 
 
+/config.log
+/config.status
 /dist-newstyle
 stack.yaml.lock
 *.prof
