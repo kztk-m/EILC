@@ -6,7 +6,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs               #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE QuantifiedConstraints      #-}
+-- {-# LANGUAGE QuantifiedConstraints      #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TemplateHaskell            #-}
@@ -21,9 +21,10 @@
 module Data.Incrementalized.Function (
     toDynI, fromDynI, -- trDFunT,
     -- FunT(..), type Delta (..), IsEmpty(..),
+
     toDynFunCache, toDynDeltaFunCache,
     toDynPFunIFqS, toDynDeltaPFunIFqS,
-    ensureSameType,
+
     IsClosed(..), fromPFun,
 
     changeFunction,
@@ -81,8 +82,8 @@ allEmptyDelta ENil = [|| True ||]
 allEmptyDelta (ECons (PackedCodeDelta da) ENil) = [|| checkEmpty $$da ||]
 allEmptyDelta (ECons (PackedCodeDelta da) das)  = [|| checkEmpty $$da && $$(allEmptyDelta das) ||]
 
-ensureSameType :: a -> a -> ()
-ensureSameType _ _ = ()
+-- ensureSameType :: a -> a -> ()
+-- ensureSameType _ _ = ()
 
 data IsClosed = Closed | Open
 
