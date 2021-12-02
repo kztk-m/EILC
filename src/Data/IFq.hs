@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE FlexibleContexts     #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE GADTs                #-}
 {-# LANGUAGE KindSignatures       #-}
@@ -14,6 +15,8 @@
 module Data.IFq (
   IFqS(..), IFq(..), convTEnv,
 
+  fstF, sndF,
+
   -- * Exporting for spliced code
   mkInteraction, ensureDiffType,
   ) where
@@ -21,9 +24,9 @@ module Data.IFq (
 
 import           Prelude              hiding (id, (.))
 
-
 import           Data.Coerce          (coerce)
 import           Data.Proxy           (Proxy (..))
+import           Data.Typeable        (Typeable)
 
 
 import           Data.Code
@@ -320,3 +323,10 @@ instance IncrementalizedQ IFqS where
   compile (IFqS _ m) = PackedCode $ toCode $ do
     (f, tr) <- m
     return $ runIFq f tr
+
+fstF :: forall e a b. (Diff a, Typeable a, Diff b, Typeable b, App IFqS e) => e (a, b) -> e a
+fstF = lift (fstS Proxy Proxy)
+
+sndF :: forall e a b. (Diff a, Typeable a, Diff b, Typeable b, App IFqS e) => e (a, b) -> e b
+sndF = lift (sndS Proxy Proxy)
+
