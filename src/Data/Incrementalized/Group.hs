@@ -25,6 +25,7 @@ import           Data.Group
 -- | @'GroupChangeWithReplace' a@ is a Delta type made from a group a.
 --   Notice that this itself does not form a group, as there is no inverse element for 'Replace a'.
 data GroupChangeWithReplace a = GroupChange !a | Replace !a
+  deriving stock Show
 
 instance Semigroup a => Semigroup (GroupChangeWithReplace a) where
   Replace a <> GroupChange b     = Replace (a <> b)
@@ -45,6 +46,7 @@ instance Applicative FromMonoid where
 
 newtype instance Delta (FromMonoid a) = DeltaFromMonoid { getGroupChangeWithReplace :: GroupChangeWithReplace a }
   deriving newtype (Semigroup, Monoid)
+  deriving stock Show
 
 instance (Eq a, Monoid a) => Diff (FromMonoid a) where
   a /+ (DeltaFromMonoid (GroupChange b)) = coerceVia FromMonoid (coerce a <> b)

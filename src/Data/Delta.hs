@@ -136,18 +136,18 @@ iterTr :: (HasAtomicDelta a, Monoid (Delta b)) => (AtomicDelta a -> c -> (Delta 
 iterTr f = unStateWriterLL . monoidMap (StateWriterLL . f)
 {-# INLINABLE iterTr #-}
 
-data instance Delta ()     = UnitDelta
-  deriving stock Show
+newtype instance Delta ()     = DeltaUnit ()
+  deriving stock (Show, Eq)
 
 data instance Delta (a, b) = PairDelta (Delta a) (Delta b)
 deriving stock instance (Show (Delta a), Show (Delta b)) => Show (Delta (a, b))
 
 instance Semigroup (Delta ()) where
-  _ <> _ = UnitDelta
+  _ <> _ = coerce ()
   {-# INLINE (<>) #-}
 
 instance Monoid (Delta ())    where
-  mempty = UnitDelta
+  mempty = coerce ()
   {-# INLINE mempty #-}
 
 instance Diff () where
@@ -158,10 +158,10 @@ instance Diff () where
   {-# INLINE checkEmpty #-}
 
 instance DiffMinus () where
-  _ /- _ = UnitDelta
+  _ /- _ = coerce ()
 
 instance DiffReplace () where
-  replaceTo _ = UnitDelta
+  replaceTo _ = coerce ()
 
 instance (Diff a, Diff b) => Diff (a, b) where
   (a, b) /+ PairDelta da db = (a /+ da, b /+ db)
@@ -226,6 +226,7 @@ newtype instance Delta Integer = DInteger Integer
   deriving (Semigroup, Monoid) via (Sum Integer)
   deriving Num via Integer
   deriving stock Show
+  deriving newtype Eq
 
 instance Diff Integer where
   a /+ DInteger da = a + da
@@ -238,6 +239,7 @@ newtype instance Delta Int = DInt Int
   deriving (Semigroup, Monoid) via (Sum Int)
   deriving Num via Int
   deriving stock Show
+  deriving newtype Eq
 
 instance Diff Int where
   a /+ DInt da = a + da
@@ -253,6 +255,7 @@ newtype instance Delta Word = DWord Int
   deriving (Semigroup, Monoid) via (Sum Int)
   deriving Num via Int
   deriving stock Show
+  deriving newtype Eq
 
 newtype instance Delta (Sum n) = DeltaSum { getDeltaSum :: Delta n }
 
@@ -278,6 +281,7 @@ newtype instance Delta Double = DDouble Double
   deriving (Semigroup, Monoid) via (Sum Double)
   deriving Num via Double
   deriving stock Show
+  deriving newtype Eq
 
 instance Diff Double where
   a /+ DDouble da = a + da
@@ -295,6 +299,7 @@ instance (Diff a, Typeable a) => DiffTypeable a
 
 -- | Delta Booleans.
 data instance Delta Bool = DBKeep | DBNot
+  deriving stock (Show, Eq)
 
 instance Semigroup (Delta Bool) where
   -- | Essentially, '<>' is defined as the exclusive or.
