@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns    #-}
-{-# LANGUAGE CPP             #-}
 {-# LANGUAGE GADTs           #-}
 {-# LANGUAGE RankNTypes      #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -18,52 +17,15 @@ module Data.Code (
 
   ) where
 
-import           Data.Delta          (Delta, Diff)
-import           Data.Function       ((&))
-import qualified Language.Haskell.TH as TH
+import           Data.Delta         (Delta, Diff)
+import           Data.Function      ((&))
 
 import           Data.Env
 
-isSimple :: Code a -> CodeC Bool
-
-#if MIN_VERSION_GLASGOW_HASKELL(9,0,1,0)
-isSimple m = CodeC $ \k -> TH.Code $ do
-  e <- TH.unTypeCode m
-  TH.examineCode $ k (isSimpleExp e)
-
-type Code a = TH.Code TH.Q a
-#else
-isSimple m = CodeC $ \k -> do
-  e <- TH.unType <$> m
-  k (isSimpleExp e)
-
-type Code a = TH.Q (TH.TExp a)
-#endif
-
-
-newtype CodeC a = CodeC { runCodeC :: forall r. (a -> Code r) -> Code r }
-
-
-isSimpleExp :: TH.Exp -> Bool
-isSimpleExp (TH.VarE _)    = True
-isSimpleExp (TH.ConE _)    = True
-isSimpleExp (TH.ParensE e) = isSimpleExp e
-isSimpleExp (TH.LitE _)    = True
-isSimpleExp _              = False
+import           Data.Code.CodeType
 
 toCode :: CodeC (Code a) -> Code a
 toCode (CodeC m) = m id
-
-instance Functor CodeC where
-  fmap f (CodeC m) = CodeC $ \k -> m (k . f)
-
-instance Applicative CodeC where
-  pure a = CodeC $ \k -> k a
-  CodeC f <*> CodeC a = CodeC $ \k -> a $ \a' -> f $ \f' -> k (f' a')
-
-instance Monad CodeC where
-  return = pure
-  m >>= f = CodeC $ \k -> runCodeC m $ \a -> runCodeC (f a) k
 
 mkLet :: Code a -> CodeC (Code a)
 mkLet e = do
