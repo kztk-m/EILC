@@ -17,6 +17,9 @@
 module Data.Incrementalized.Bag
   (
     Bag(..), Delta(..),
+
+    foldBag, myFoldMap,
+
     foldBagF, foldMapF,
 
     singletonBagF,
@@ -47,6 +50,7 @@ import           Data.Incrementalized                (fromFunctionsCode,
                                                       fromStatelessCode)
 import           Data.Incrementalized.Function
 import           Data.Incrementalized.Group
+import           Data.Incrementalized.Numeric
 import           Data.Monoid                         (Sum (..))
 import           Data.Proxy                          (Proxy (Proxy))
 import           Data.Typeable                       (Typeable)

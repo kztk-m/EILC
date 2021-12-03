@@ -7,14 +7,19 @@
 
 module Main (main) where
 
-import           Data.DeltaSpec
+import           Data.DeltaSpec                    ()
+import           Data.Incrementalized.BagSpec
+import           Data.Incrementalized.BoolSpec
 import           Data.Incrementalized.FunctionSpec
 import           Data.Incrementalized.GroupSpec
+import           Data.Incrementalized.NumericSpec
 import           Test.Hspec
 
 
 main :: IO ()
 main = hspec $ do
-  testDelta
   testGroup
   testFunctions
+  testNumeric
+  testBool
+  testBag

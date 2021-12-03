@@ -5,10 +5,12 @@
 module Data.Incrementalized.Bag.Core
   (
     Bag(..), singletonBag, Delta(..),
+    foldBag,
 
     FoldBagC(..), foldBagC, foldBagI, foldBagTr,
 
     Map(..),
+    myFoldMap,
     FoldMapC(..), foldMapC, foldMapI, foldMapTr,
   )
 where
@@ -28,6 +30,7 @@ import qualified Data.Map.Strict               as M
 
 -- | @Bag a@ is defined to be a mapping from elements to their quanties.
 newtype Bag a = Bag { unBag :: M.Map a Int }
+  deriving stock Show
 
 normalize :: Bag a -> Bag a
 normalize (Bag a) = Bag $ M.filter (/= 0) a
@@ -47,22 +50,21 @@ instance Ord a => Group (Bag a) where
 instance Ord a => Abelian (Bag a)
 
 instance Ord a => Eq (Bag a) where
-  -- | Assumption: @as@ and @bs@ have already been normalized.
-  Bag as == Bag bs = as == bs
+  as == bs = unBag (normalize as) == unBag (normalize bs)
 
 newtype instance Delta (Bag a) = DeltaBag (GroupChangeWithReplace (Bag a))
   deriving newtype (Semigroup, Monoid)
-
+  deriving stock Show
 
 instance Ord a => Diff (Bag a) where
-  Bag as /+ DeltaBag (GroupChange (Bag bs)) = Bag (as <> bs)
-  Bag _  /+ DeltaBag (Replace bs)           = bs
+  as /+ DeltaBag (GroupChange bs) = as <> bs
+  _  /+ DeltaBag (Replace bs)     = bs
 
   checkEmpty (DeltaBag (GroupChange (Bag as))) = M.null as
   checkEmpty _                                 = False
 
 instance Ord a => DiffMinus (Bag a) where
-  as /- bs = DeltaBag (GroupChange (invert as <> bs))
+  as /- bs = DeltaBag (GroupChange (invert bs <> as))
 
 instance Ord a => DiffReplace (Bag a) where
   replaceTo as = DeltaBag (Replace as)
@@ -129,7 +131,9 @@ foldBagTrChanged df (JustFB (f, cs)) =
       | k < 0 = error "foldBagTrChanged cannot handle negative quantity"
       | otherwise =
         let (dt, c') = df c
+        -- following code is wrong: but, how we deal with this?
         in (mconcat (replicate k dt), [(c',k)])
+
 
 foldBagInit ::
   Group t =>

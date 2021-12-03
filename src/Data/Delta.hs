@@ -48,7 +48,7 @@ module Data.Delta (
 import           Data.Coerce           (Coercible, coerce)
 import           Data.Functor.Identity
 import           Data.Kind             (Type)
-import           Data.Monoid           (Endo (..), Sum (..))
+import           Data.Monoid           (Endo (..))
 import           Data.Typeable         (Typeable)
 
 -- $setup
@@ -222,105 +222,9 @@ instance HasAtomicDelta a => HasAtomicDelta (Identity a) where
 
 deriving via AtomicDelta a instance Show (AtomicDelta a) => Show (AtomicDelta (Identity a))
 
-newtype instance Delta Integer = DInteger Integer
-  deriving (Semigroup, Monoid) via (Sum Integer)
-  deriving Num via Integer
-  deriving stock Show
-  deriving newtype Eq
 
-instance Diff Integer where
-  a /+ DInteger da = a + da
-  checkEmpty (DInteger n) = n == 0
-
-instance DiffMinus Integer where
-  a /- b = DInteger (a - b)
-
-newtype instance Delta Int = DInt Int
-  deriving (Semigroup, Monoid) via (Sum Int)
-  deriving Num via Int
-  deriving stock Show
-  deriving newtype Eq
-
-instance Diff Int where
-  a /+ DInt da = a + da
-  {-# INLINE (/+) #-}
-
-  checkEmpty (DInt n) = n == 0
-  {-# INLINE checkEmpty #-}
-
-instance DiffMinus Int where
-  a /- b = DInt (a - b)
-
-newtype instance Delta Word = DWord Int
-  deriving (Semigroup, Monoid) via (Sum Int)
-  deriving Num via Int
-  deriving stock Show
-  deriving newtype Eq
-
-newtype instance Delta (Sum n) = DeltaSum { getDeltaSum :: Delta n }
-
-deriving newtype instance Semigroup (Delta n) => Semigroup (Delta (Sum n))
-deriving newtype instance Monoid    (Delta n) => Monoid    (Delta (Sum n))
-
-deriving via n instance Diff n => Diff (Sum n)
-deriving via n instance DiffMinus n => DiffMinus (Sum n)
-deriving via n instance DiffReplace n => DiffReplace (Sum n)
-
-instance Diff Word where
-  a /+ DWord da = a + fromIntegral da
-  {-# INLINE (/+) #-}
-
-  checkEmpty (DWord n) = n == 0
-  {-# INLINE checkEmpty #-}
-
-instance DiffMinus Word where
-  a /- b = DWord (fromIntegral a - fromIntegral b)
-
--- | This definition does not care machine errors.
-newtype instance Delta Double = DDouble Double
-  deriving (Semigroup, Monoid) via (Sum Double)
-  deriving Num via Double
-  deriving stock Show
-  deriving newtype Eq
-
-instance Diff Double where
-  a /+ DDouble da = a + da
-  {-# INLINE (/+) #-}
-
-  checkEmpty (DDouble n) = n == 0
-  {-# INLINE checkEmpty #-}
-
-instance DiffMinus Double where
-  a /- b = DDouble (a - b)
 
 -- | @'DiffTypeable' a@ equivalent to @(Diff a, Typeable a)@.
 class (Diff a, Typeable a) => DiffTypeable a
 instance (Diff a, Typeable a) => DiffTypeable a
 
--- | Delta Booleans.
-data instance Delta Bool = DBKeep | DBNot
-  deriving stock (Show, Eq)
-
-instance Semigroup (Delta Bool) where
-  -- | Essentially, '<>' is defined as the exclusive or.
-  DBKeep <> DBKeep = DBKeep
-  DBKeep <> DBNot  = DBNot
-  DBNot  <> DBKeep = DBNot
-  DBNot  <> DBNot  = DBKeep
-  {-# INLINE (<>) #-}
-
-instance Monoid (Delta Bool) where
-  mempty = DBKeep
-  {-# INLINE mempty #-}
-
-instance Diff Bool where
-  x /+ DBKeep = x
-  x /+ DBNot  = not x
-  {-# INLINE (/+) #-}
-
-  checkEmpty DBKeep = True
-  checkEmpty DBNot  = False
-  {-# INLINE checkEmpty #-}
-
-instance DiffMinus Bool where
-  x /- y = if x == y then DBKeep else DBNot

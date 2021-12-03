@@ -1,6 +1,8 @@
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE InstanceSigs              #-}
 {-# LANGUAGE KindSignatures            #-}
 {-# LANGUAGE LambdaCase                #-}
 {-# LANGUAGE MultiParamTypeClasses     #-}
@@ -106,3 +108,5 @@ instance LetTerm IFqS IFqT where
         (db, c2') <- tr2 (ECons (PackedCodeDelta dv) s) c2
         return (db, joinConn c1' c2')
     return (f, tr)
+
+

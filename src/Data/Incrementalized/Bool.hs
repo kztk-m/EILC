@@ -1,5 +1,6 @@
 {-# LANGUAGE ConstraintKinds        #-}
 {-# LANGUAGE DataKinds              #-}
+{-# LANGUAGE DerivingStrategies     #-}
 {-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
@@ -11,9 +12,12 @@
 {-# LANGUAGE TypeApplications       #-}
 {-# LANGUAGE TypeFamilies           #-}
 {-# LANGUAGE TypeOperators          #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Data.Incrementalized.Bool
   (
+    Delta(..),
+
     delay, Lazy,
 
     IfTerm(..), if_,
@@ -58,6 +62,34 @@ import           Data.Incrementalized.Function
 -- :}
 --
 -- >>> let func = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \ab -> share (sndF ab) $ \b -> if_ (fstF ab) b (lift doubleC b) )
+
+-- | Delta Booleans.
+data instance Delta Bool = DBKeep | DBNot
+  deriving stock (Show, Eq)
+
+instance Semigroup (Delta Bool) where
+  -- | Essentially, '<>' is defined as the exclusive or.
+  DBKeep <> DBKeep = DBKeep
+  DBKeep <> DBNot  = DBNot
+  DBNot  <> DBKeep = DBNot
+  DBNot  <> DBNot  = DBKeep
+  {-# INLINE (<>) #-}
+
+instance Monoid (Delta Bool) where
+  mempty = DBKeep
+  {-# INLINE mempty #-}
+
+instance Diff Bool where
+  x /+ DBKeep = x
+  x /+ DBNot  = not x
+  {-# INLINE (/+) #-}
+
+  checkEmpty DBKeep = True
+  checkEmpty DBNot  = False
+  {-# INLINE checkEmpty #-}
+
+instance DiffMinus Bool where
+  x /- y = if x == y then DBKeep else DBNot
 
 
 type Lazy cat c a = PFun cat c () a

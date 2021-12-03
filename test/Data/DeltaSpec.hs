@@ -10,7 +10,7 @@ module Data.DeltaSpec
     checkDiffLaws, checkDiffMinusLaws, checkDiffReplaceLaws,
     describeProxy,
 
-    testDelta
+--    testDelta
   )
 where
 
@@ -76,9 +76,7 @@ checkDiffReplaceLaws (_ :: Proxy a) = do
   it "satisifes the DiffReplace law" $
     property $ \(x :: a) y -> propDiffReplace x y
 
-deriving newtype instance Arbitrary (Delta Int)
 deriving newtype instance Arbitrary (Delta ())
-deriving newtype instance Arbitrary (Delta Word)
 
 instance (Arbitrary (Delta a), Arbitrary (Delta b)) => Arbitrary (Delta (a, b)) where
   arbitrary = fmap (uncurry PairDelta) arbitrary
@@ -86,40 +84,40 @@ instance (Arbitrary (Delta a), Arbitrary (Delta b)) => Arbitrary (Delta (a, b)) 
     uncurry PairDelta <$> shrink (a, b)
 
 
-propIntOk :: Spec
-propIntOk = do
-  let p = Proxy :: Proxy Int
-  describeProxy p $ do
-    checkDiffLaws p
-    checkDiffMinusLaws p
+-- propIntOk :: Spec
+-- propIntOk = do
+--   let p = Proxy :: Proxy Int
+--   describeProxy p $ do
+--     checkDiffLaws p
+--     checkDiffMinusLaws p
 
-propWordOk :: Spec
-propWordOk = do
-  let p = Proxy :: Proxy Word
-  describeProxy p $ do
-    checkDiffLaws p
-    checkDiffMinusLaws p
+-- propWordOk :: Spec
+-- propWordOk = do
+--   let p = Proxy :: Proxy Word
+--   describeProxy p $ do
+--     checkDiffLaws p
+--     checkDiffMinusLaws p
 
-propUnitOk :: Spec
-propUnitOk = do
-  let p = Proxy :: Proxy ()
-  describeProxy p $ do
-    checkDiffLaws p
-    checkDiffMinusLaws p
-    checkDiffReplaceLaws p
+-- propUnitOk :: Spec
+-- propUnitOk = do
+--   let p = Proxy :: Proxy ()
+--   describeProxy p $ do
+--     checkDiffLaws p
+--     checkDiffMinusLaws p
+--     checkDiffReplaceLaws p
 
-propProductOk :: Spec
-propProductOk = do
-  let p = Proxy :: Proxy ((Int, Word), ())
-  describeProxy p $ do
-    checkDiffLaws p
-    checkDiffMinusLaws p
+-- propProductOk :: Spec
+-- propProductOk = do
+--   let p = Proxy :: Proxy ((Int, Word), ())
+--   describeProxy p $ do
+--     checkDiffLaws p
+--     checkDiffMinusLaws p
 
 
-testDelta :: Spec
-testDelta = describe "Diff instances of primitives" $ do
-  propUnitOk
-  propIntOk
-  propWordOk
-  propProductOk
+-- testDelta :: Spec
+-- testDelta = describe "Diff instances of primitives" $ do
+--   propUnitOk
+--   propIntOk
+--   propWordOk
+--   propProductOk
 

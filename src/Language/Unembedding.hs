@@ -19,7 +19,7 @@ module Language.Unembedding (
 
   HasProduct(..), Closed(..),
   Term(..), LetTerm(..), FunTerm(..),
-  NumTerm(..),
+  HasNum(..),
 
   App(..),
   Sig2, type (~>),
@@ -278,46 +278,70 @@ class (CategoryK cat, HasProduct cat) => Cartesian cat where
 --   FIXME: We later move this implementation into other module and makes this module not to expose the definition.
 newtype TSem cat term b = TSem { runTSem :: forall as. AllIn as (K cat) => Env Proxy as -> term as b }
 
-class (K cat a, LetTerm cat term) => NumTerm cat term a where
-  addTerm :: (AllIn s (K cat)) => Env Proxy s -> term (a ': a ': s) a
-  multiplyTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': a ': s) a
-  absTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': s) a
-  signumTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': s) a
-  fromIntegerTerm :: AllIn s (K cat) => Integer -> Env Proxy s -> term s a
+class (K cat a, CategoryK cat) => HasNum cat a where
+  addS       :: (K cat (Prod cat a a)) => cat (Prod cat a a) a
+  multiplyS  :: (K cat (Prod cat a a)) => cat (Prod cat a a) a
+  absS       :: cat a a
+  signumS    :: cat a a
+  fromIntegerS :: Integer -> cat (Unit cat) a
+  negateS    :: cat a a
+  subtractS  :: K cat (Prod cat a a) => cat (Prod cat a a ) a
 
-  negateTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': s) a
-  negateTerm tenv =
-    letTerm (fromIntegerTerm 0 (ECons Proxy tenv)) $
-    subtractTerm tenv
+-- class (K cat a, LetTerm cat term) => NumTerm cat term a where
+--   addTerm :: (AllIn s (K cat)) => Env Proxy s -> term (a ': a ': s) a
+--   multiplyTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': a ': s) a
+--   absTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': s) a
+--   signumTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': s) a
+--   fromIntegerTerm :: AllIn s (K cat) => Integer -> Env Proxy s -> term s a
 
-  subtractTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': a ': s) a
-  subtractTerm tenv =
-    letTerm (var0Term (ECons Proxy tenv)) $
-    letTerm (weakenTerm $ weakenTerm $ negateTerm tenv) $
-    addTerm (ECons Proxy $ ECons Proxy tenv)
+--   negateTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': s) a
+--   negateTerm tenv =
+--     letTerm (fromIntegerTerm 0 (ECons Proxy tenv)) $
+--     subtractTerm tenv
 
+--   subtractTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': a ': s) a
+--   subtractTerm tenv =
+--     letTerm (var0Term (ECons Proxy tenv)) $
+--     letTerm (weakenTerm $ weakenTerm $ negateTerm tenv) $
+--     addTerm (ECons Proxy $ ECons Proxy tenv)
 
-instance (NumTerm cat term a) => Num (TSem cat term a) where
-  TSem t1 + TSem t2 = TSem $ \tenv ->
-    letTerm (t2 tenv) $
-    letTerm (t1 (ECons Proxy tenv)) $
-    addTerm tenv
-  TSem t1 * TSem t2 = TSem $ \tenv ->
-    letTerm (t2 tenv) $
-    letTerm (t1 (ECons Proxy tenv)) $
-    multiplyTerm tenv
-  abs (TSem t1) =
-    TSem $ \tenv -> letTerm (t1 tenv) $ absTerm tenv
-  signum (TSem t1) =
-    TSem $ \tenv -> letTerm (t1 tenv) $ signumTerm tenv
-  fromInteger n = TSem $ \tenv -> fromIntegerTerm n tenv
+instance (Term cat term, Cartesian cat, HasNum cat a) => Num (TSem cat term a) where
+  e1 + e2 = case prodOk (Proxy :: Proxy cat) (Proxy :: Proxy a) (Proxy :: Proxy a) of
+    Wit -> lift addS (pair e1 e2)
 
-  negate (TSem t1) =
-    TSem $ \tenv -> letTerm (t1 tenv) $ negateTerm tenv
-  TSem t1 - TSem t2 = TSem $ \tenv ->
-    letTerm (t2 tenv) $
-    letTerm (t1 (ECons Proxy tenv)) $
-    subtractTerm tenv
+  e1 * e2 = case prodOk (Proxy @cat) (Proxy @a) (Proxy @a) of
+    Wit -> lift multiplyS (pair e1 e2)
+
+  abs = lift absS
+  signum = lift signumS
+  fromInteger n = case unitOk (Proxy @cat) of
+    Wit -> lift (fromIntegerS n) unit
+
+  negate = lift negateS
+  e1 - e2 = case prodOk (Proxy @cat) (Proxy @a) (Proxy @a) of
+    Wit -> lift subtractS (pair e1 e2)
+
+-- instance (NumTerm cat term a) => Num (TSem cat term a) where
+--   TSem t1 + TSem t2 = TSem $ \tenv ->
+--     letTerm (t2 tenv) $
+--     letTerm (t1 (ECons Proxy tenv)) $
+--     addTerm tenv
+--   TSem t1 * TSem t2 = TSem $ \tenv ->
+--     letTerm (t2 tenv) $
+--     letTerm (t1 (ECons Proxy tenv)) $
+--     multiplyTerm tenv
+--   abs (TSem t1) =
+--     TSem $ \tenv -> letTerm (t1 tenv) $ absTerm tenv
+--   signum (TSem t1) =
+--     TSem $ \tenv -> letTerm (t1 tenv) $ signumTerm tenv
+--   fromInteger n = TSem $ \tenv -> fromIntegerTerm n tenv
+
+--   negate (TSem t1) =
+--     TSem $ \tenv -> letTerm (t1 tenv) $ negateTerm tenv
+--   TSem t1 - TSem t2 = TSem $ \tenv ->
+--     letTerm (t2 tenv) $
+--     letTerm (t1 (ECons Proxy tenv)) $
+--     subtractTerm tenv
 
 
 instance Term cat term => App cat (TSem cat term) where

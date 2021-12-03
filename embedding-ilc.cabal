@@ -64,6 +64,7 @@ library
         Data.Env        
         Data.Interaction 
         Data.Incrementalized
+        Data.Incrementalized.Numeric 
         Data.Incrementalized.Function 
         Data.Incrementalized.Bool
         Data.Incrementalized.Group
@@ -134,6 +135,9 @@ test-suite embedding-ilc-test
         Data.IncrementalizedSpec 
         Data.Incrementalized.GroupSpec 
         Data.Incrementalized.FunctionSpec 
+        Data.Incrementalized.NumericSpec 
+        Data.Incrementalized.BoolSpec 
+        Data.Incrementalized.BagSpec 
         Data.Incrementalized.FunctionSpecCore
 
 

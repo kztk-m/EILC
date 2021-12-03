@@ -16,6 +16,8 @@ propIncrementalizedFunc ::
 propIncrementalizedFunc f  =
   property $ \a ->
   let (b, i) = f a
-  in property $ \das -> fst (f $ foldl (/+) a das) === foldl (/+) b (iterations i das)
+  in property $ \das ->
+    label ("length of a change sequence: " ++ show (length das)) $
+    fst (f $ foldl (/+) a das) === foldl (/+) b (iterations i das)
 
 

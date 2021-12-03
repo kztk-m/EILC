@@ -12,10 +12,12 @@ import           Data.IFqT
 import           Data.IFqTU
 import           Data.Incrementalized
 import           Data.Incrementalized.Function         ()
+import           Data.Incrementalized.Numeric
 import           Data.Interaction
 import           Language.Unembedding
 
 import           Data.DeltaSpec                        ()
+import           Data.Incrementalized.NumericSpec
 import           Data.IncrementalizedSpec
 
 import           Data.Typeable
