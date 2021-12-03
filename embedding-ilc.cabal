@@ -124,12 +124,19 @@ common tests
        -Wcompat
 
 
-test-suite embedding-ilc-test-num 
+test-suite embedding-ilc-test
     import:           tests 
     hs-source-dirs:   test
     type:             exitcode-stdio-1.0
-    main-is:          TestNum.hs
-    
+    main-is:          Spec.hs
+    other-modules: 
+        Data.DeltaSpec                          
+        Data.IncrementalizedSpec 
+        Data.Incrementalized.GroupSpec 
+        Data.Incrementalized.FunctionSpec 
+        Data.Incrementalized.FunctionSpecCore
+
+
 -- test-suite embedding-ilc-test
 --     default-language: Haskell2010
 --     type:             exitcode-stdio-1.0

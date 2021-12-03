@@ -1,24 +1,25 @@
-{-# LANGUAGE ConstraintKinds        #-}
-{-# LANGUAGE DataKinds              #-}
-{-# LANGUAGE FlexibleContexts       #-}
-{-# LANGUAGE FlexibleInstances      #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GADTs                  #-}
-{-# LANGUAGE InstanceSigs           #-}
-{-# LANGUAGE KindSignatures         #-}
-{-# LANGUAGE MultiParamTypeClasses  #-}
-{-# LANGUAGE PolyKinds              #-}
-{-# LANGUAGE RankNTypes             #-}
-{-# LANGUAGE ScopedTypeVariables    #-}
-{-# LANGUAGE TypeApplications       #-}
-{-# LANGUAGE TypeFamilies           #-}
-{-# LANGUAGE TypeOperators          #-}
-{-# LANGUAGE UndecidableInstances   #-}
+{-# LANGUAGE ConstraintKinds         #-}
+{-# LANGUAGE DataKinds               #-}
+{-# LANGUAGE FlexibleContexts        #-}
+{-# LANGUAGE FlexibleInstances       #-}
+{-# LANGUAGE FunctionalDependencies  #-}
+{-# LANGUAGE GADTs                   #-}
+{-# LANGUAGE InstanceSigs            #-}
+{-# LANGUAGE KindSignatures          #-}
+{-# LANGUAGE MultiParamTypeClasses   #-}
+{-# LANGUAGE PolyKinds               #-}
+{-# LANGUAGE RankNTypes              #-}
+{-# LANGUAGE ScopedTypeVariables     #-}
+{-# LANGUAGE TypeApplications        #-}
+{-# LANGUAGE TypeFamilies            #-}
+{-# LANGUAGE TypeOperators           #-}
+{-# LANGUAGE UndecidableInstances    #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
 module Language.Unembedding (
 
   HasProduct(..), Closed(..),
   Term(..), LetTerm(..), FunTerm(..),
-
+  NumTerm(..),
 
   App(..),
   Sig2, type (~>),
@@ -276,6 +277,48 @@ class (CategoryK cat, HasProduct cat) => Cartesian cat where
 -- | Semantics for unebedding.
 --   FIXME: We later move this implementation into other module and makes this module not to expose the definition.
 newtype TSem cat term b = TSem { runTSem :: forall as. AllIn as (K cat) => Env Proxy as -> term as b }
+
+class (K cat a, LetTerm cat term) => NumTerm cat term a where
+  addTerm :: (AllIn s (K cat)) => Env Proxy s -> term (a ': a ': s) a
+  multiplyTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': a ': s) a
+  absTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': s) a
+  signumTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': s) a
+  fromIntegerTerm :: AllIn s (K cat) => Integer -> Env Proxy s -> term s a
+
+  negateTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': s) a
+  negateTerm tenv =
+    letTerm (fromIntegerTerm 0 (ECons Proxy tenv)) $
+    subtractTerm tenv
+
+  subtractTerm :: AllIn s (K cat) => Env Proxy s -> term (a ': a ': s) a
+  subtractTerm tenv =
+    letTerm (var0Term (ECons Proxy tenv)) $
+    letTerm (weakenTerm $ weakenTerm $ negateTerm tenv) $
+    addTerm (ECons Proxy $ ECons Proxy tenv)
+
+
+instance (NumTerm cat term a) => Num (TSem cat term a) where
+  TSem t1 + TSem t2 = TSem $ \tenv ->
+    letTerm (t2 tenv) $
+    letTerm (t1 (ECons Proxy tenv)) $
+    addTerm tenv
+  TSem t1 * TSem t2 = TSem $ \tenv ->
+    letTerm (t2 tenv) $
+    letTerm (t1 (ECons Proxy tenv)) $
+    multiplyTerm tenv
+  abs (TSem t1) =
+    TSem $ \tenv -> letTerm (t1 tenv) $ absTerm tenv
+  signum (TSem t1) =
+    TSem $ \tenv -> letTerm (t1 tenv) $ signumTerm tenv
+  fromInteger n = TSem $ \tenv -> fromIntegerTerm n tenv
+
+  negate (TSem t1) =
+    TSem $ \tenv -> letTerm (t1 tenv) $ negateTerm tenv
+  TSem t1 - TSem t2 = TSem $ \tenv ->
+    letTerm (t2 tenv) $
+    letTerm (t1 (ECons Proxy tenv)) $
+    subtractTerm tenv
+
 
 instance Term cat term => App cat (TSem cat term) where
   lift x (TSem e) = TSem $ \tenv -> mapTerm x (e tenv)
