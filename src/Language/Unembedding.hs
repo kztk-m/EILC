@@ -19,7 +19,8 @@ module Language.Unembedding (
 
   HasProduct(..), Closed(..),
   Term(..), LetTerm(..), FunTerm(..),
-  HasNum(..),
+
+  HasNum(..), HasSemigroup(..), HasMonoid(..), HasGroup(..),
 
   App(..),
   Sig2, type (~>),
@@ -48,6 +49,8 @@ import           Prelude       hiding (id, (.))
 import qualified Prelude
 -- import           Text.Printf
 import qualified Unsafe.Coerce as Unsafe
+
+import           Data.Group
 
 
 class CategoryK (cat :: k -> k -> Type) where
@@ -278,14 +281,25 @@ class (CategoryK cat, HasProduct cat) => Cartesian cat where
 --   FIXME: We later move this implementation into other module and makes this module not to expose the definition.
 newtype TSem cat term b = TSem { runTSem :: forall as. AllIn as (K cat) => Env Proxy as -> term as b }
 
-class (K cat a, CategoryK cat) => HasNum cat a where
-  addS       :: (K cat (Prod cat a a)) => cat (Prod cat a a) a
-  multiplyS  :: (K cat (Prod cat a a)) => cat (Prod cat a a) a
+class (K cat a, CategoryK cat, HasProduct cat) => HasNum cat a where
+  addS       :: cat (Prod cat a a) a
+  multiplyS  :: cat (Prod cat a a) a
   absS       :: cat a a
   signumS    :: cat a a
   fromIntegerS :: Integer -> cat (Unit cat) a
   negateS    :: cat a a
   subtractS  :: K cat (Prod cat a a) => cat (Prod cat a a ) a
+
+class (K cat t, CategoryK cat, HasProduct cat) => HasSemigroup cat t where
+  mappendS :: cat (Prod cat t t) t
+
+class HasSemigroup cat t => HasMonoid cat t where
+  memptyS :: cat (Unit cat) t
+
+class (K cat t, HasMonoid cat t) => HasGroup cat t where
+  invertS :: cat t t
+
+
 
 -- class (K cat a, LetTerm cat term) => NumTerm cat term a where
 --   addTerm :: (AllIn s (K cat)) => Env Proxy s -> term (a ': a ': s) a
@@ -342,6 +356,17 @@ instance (Term cat term, Cartesian cat, HasNum cat a) => Num (TSem cat term a) w
 --     letTerm (t2 tenv) $
 --     letTerm (t1 (ECons Proxy tenv)) $
 --     subtractTerm tenv
+
+instance (Term cat term, HasSemigroup cat t) => Semigroup (TSem cat term t) where
+  e1 <> e2 = case prodOk (Proxy :: Proxy cat) (Proxy :: Proxy t) (Proxy :: Proxy t) of
+               Wit -> lift mappendS (pair e1 e2)
+
+instance (Term cat term, HasMonoid cat t) => Monoid (TSem cat term t) where
+  mempty = case unitOk (Proxy :: Proxy cat) of
+             Wit -> lift memptyS unit
+
+instance (Term cat term, HasGroup cat t) => Group (TSem cat term t) where
+  invert = lift invertS
 
 
 instance Term cat term => App cat (TSem cat term) where

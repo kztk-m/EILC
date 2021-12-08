@@ -19,6 +19,9 @@ module Data.Delta (
   pairDelta, fstDelta, sndDelta,
   DiffTypeable,
 
+  -- * Utilities to define Diff instances
+  applyDeltaFromHasAtomicDelta, checkEmptyFromAtomicDelta,
+
   -- * Some Useful Functions
   iterTr, iterTrStateless, nilChangeOf,
 
@@ -83,6 +86,12 @@ class Monoid (Delta a) => Diff a where
   -- default checkEmpty :: HasAtomicDelta a => Delta a -> Bool
   -- checkEmpty = foldrDelta (\_ _ -> False) True
   -- {-# INLINABLE checkEmpty #-}
+
+applyDeltaFromHasAtomicDelta :: HasAtomicDelta a => a -> Delta a -> a
+applyDeltaFromHasAtomicDelta = foldl'Delta applyAtomicDelta
+
+checkEmptyFromAtomicDelta :: HasAtomicDelta a => Delta a -> Bool
+checkEmptyFromAtomicDelta = foldrDelta (\_ _ -> False) True
 
 class Diff a => DiffMinus a where
   -- | prop> a /+ (a' /- a) == a'

@@ -25,10 +25,10 @@ propDiff1
 propDiff1 x
   = x /+ mempty === x
 
-propCheckEmpty :: (Diff a, Eq a) => a -> Delta a -> Property
-propCheckEmpty x dx =
-  -- checks contraposition
-  x /+ dx /= x ==> not (checkEmpty dx)
+-- propCheckEmpty :: (Diff a, Eq a) => a -> Delta a -> Property
+-- propCheckEmpty x dx =
+--   -- checks contraposition
+--   x /+ dx /= x ==> not (checkEmpty dx)
 
 
 propDiff2

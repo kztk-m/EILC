@@ -18,31 +18,42 @@ import           Data.Incrementalized.Group
 
 import           Data.Typeable
 
-deriving newtype instance Arbitrary a => Arbitrary (FromMonoid a)
+deriving newtype instance Arbitrary a => Arbitrary (GroupChange a)
+deriving newtype instance Arbitrary a => Arbitrary (WithGroupChange a)
+deriving newtype instance Arbitrary a => Arbitrary (WithGroupChangeReplace a)
 
 instance Arbitrary a => Arbitrary (GroupChangeWithReplace a) where
-  arbitrary = either GroupChange Replace <$>
+  arbitrary = either InjGroupChange Replace <$>
               frequency [ (3, arbitrary),
                           (1, arbitrary) ]
 
-  shrink = fmap (either GroupChange Replace) . shrink . g2e
+  shrink = fmap (either InjGroupChange Replace) . shrink . g2e
     where
-      g2e (GroupChange a) = Left a
-      g2e (Replace     a) = Right a
+      g2e (InjGroupChange a) = Left a
+      g2e (Replace     a)    = Right a
 
-deriving newtype instance Arbitrary a => Arbitrary (Delta (FromMonoid a))
+deriving newtype instance Arbitrary a => Arbitrary (Delta (WithGroupChange a))
+deriving newtype instance Arbitrary a => Arbitrary (Delta (WithGroupChangeReplace a))
 
 propIntOk :: Spec
 propIntOk = do
-  let p = Proxy :: Proxy (FromMonoid (Sum Int))
+  let p = Proxy :: Proxy (WithGroupChange (Sum Int))
   describeProxy p $ do
     checkDiffLaws p
     checkDiffMinusLaws p
-    checkDiffReplaceLaws p
+--    checkDiffReplaceLaws p
 
 propIntProductOk :: Spec
 propIntProductOk = do
-  let p = Proxy :: Proxy (FromMonoid (Sum Int, Sum Int, ()))
+  let p = Proxy :: Proxy (WithGroupChange (Sum Int, Sum Int, ()))
+  describeProxy p $ do
+    checkDiffLaws p
+    checkDiffMinusLaws p
+--    checkDiffReplaceLaws p
+
+propIntProductROk :: Spec
+propIntProductROk = do
+  let p = Proxy :: Proxy (WithGroupChangeReplace (Sum Int, Sum Int, ()))
   describeProxy p $ do
     checkDiffLaws p
     checkDiffMinusLaws p
@@ -52,3 +63,4 @@ testGroup :: Spec
 testGroup = describe "Group Change" $ do
   propIntOk
   propIntProductOk
+  propIntProductROk

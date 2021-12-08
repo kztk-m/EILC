@@ -11,7 +11,7 @@ import           Data.Proxy
 
 import           Data.Delta
 import           Data.Incrementalized.Bag
-import           Data.Incrementalized.Group
+import           Data.Incrementalized.Group       ()
 
 import           Data.IFq
 import           Data.IFqTU
@@ -23,16 +23,20 @@ import           Data.Incrementalized.NumericSpec ()
 import           Data.IncrementalizedSpec
 
 import           Test.Hspec
-import           Test.QuickCheck
+import           Test.QuickCheck                  hiding (Fixed (..))
 
 import           Data.Incrementalized
 import qualified Data.Map                         as M
 
-instance (Ord a, Arbitrary a) => Arbitrary (Bag a) where
-  arbitrary = Bag Prelude.. M.fromList <$> listOf ls
-    where ls = (\a b -> (a, getNonNegative b)) <$> arbitrary <*> (arbitrary :: Gen (NonNegative Int))
+deriving newtype instance Arbitrary a => Arbitrary (Fixed a)
 
-deriving newtype instance (Ord a, Arbitrary a) => Arbitrary (Delta (Bag a))
+instance (Ord k, Arbitrary k, Arbitrary a) => Arbitrary (Map k a) where
+  arbitrary = Map Prelude.. M.fromList <$> listOf ls
+    where ls = (,) <$> arbitrary <*> arbitrary
+
+deriving newtype instance (Ord k, Arbitrary k, Arbitrary a) => Arbitrary (Delta (Map (Fixed k) a))
+
+-- deriving newtype instance (Ord a, Arbitrary a) => Arbitrary (Delta (Bag a))
 
 propBagOk :: Spec
 propBagOk = do
@@ -40,17 +44,17 @@ propBagOk = do
   describeProxy p $ do
     checkDiffLaws p
     checkDiffMinusLaws p
-    checkDiffReplaceLaws p
+--    checkDiffReplaceLaws p
 
 simpleSumBag :: IncrementalizedFunc (Bag (Sum Int)) (Sum Int)
 simpleSumBag = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \x ->
-                     foldBagF Prelude.id x )
+                     foldBagF unfixedF x )
 
 simpleSumBag2 :: IncrementalizedFunc (Sum Int, Bag (Sum Int)) (Sum Int)
 simpleSumBag2 = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \xy ->
                       share (fstF xy) $ \a ->
-                      share (sndF xy) $ \b ->
-                      foldBagF (+ a) b )
+                      share (sndF xy) $ \bs ->
+                      foldBagF (\b -> a + unfixedF b) bs )
 
 sumBags :: IncrementalizedFunc (Bag (Sum Int), Bag (Sum Int)) (Sum Int)
 sumBags = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \x ->
@@ -58,7 +62,7 @@ sumBags = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \x ->
                 share (sndF x) $ \b ->
                 flip foldBagF a $ \e ->
                 flip foldBagF b $ \e' ->
-                e + e' )
+                unfixedF e + unfixedF e' )
 
 
 
@@ -68,7 +72,7 @@ simpleSumBagOk = do
     propIncrementalizedFunc simpleSumBag
   it "simpleSumBag sums Bag elements" $ do
     property $ \b ->
-     fst (simpleSumBag b) === foldBag Prelude.id b
+     fst (simpleSumBag b) === foldBag getFixed b
 
 simpleSumBag2Ok :: Spec
 simpleSumBag2Ok = do
@@ -76,7 +80,7 @@ simpleSumBag2Ok = do
     propIncrementalizedFunc simpleSumBag2
   it "simpleSumBag2 correct" $ do
     property $ \(x,b) ->
-     fst (simpleSumBag2 (x,b)) === foldBag (+ x) b
+     fst (simpleSumBag2 (x,b)) === foldBag (( x + ) Prelude.. getFixed ) b
 
 
 -- sumBagsOk :: Spec

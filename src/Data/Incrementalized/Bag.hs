@@ -10,13 +10,14 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
-{-# LANGUAGE BangPatterns               #-}
 {-# LANGUAGE DeriveLift                 #-}
 {-# LANGUAGE FlexibleInstances          #-}
 
 module Data.Incrementalized.Bag
   (
-    Bag(..), Delta(..),
+    Fixed(..), fstFixedF, sndFixedF, pairFixedF, unfixedF,
+
+    Bag, Map(..), Delta(..),
 
     foldBag, myFoldMap,
 
@@ -29,15 +30,14 @@ module Data.Incrementalized.Bag
     singletonBagI, singletonBagTr,
     singletonMapI, singletonMapTr,
 
-    foldBagI, foldBagTr,
-    foldMapI, foldMapTr,
+    -- foldBagI, foldBagTr,
+    -- foldMapI, foldMapTr,
 
     -- * Some Examples (will be moved)
     mapReduce, histogram,
   )
 where
 
-import qualified Data.Map.Strict                     as M
 
 import           Prelude                             hiding (id, (.))
 
@@ -64,68 +64,60 @@ import           Data.Incrementalized.Bag.Core
 
 
 -- [???] I don't know but the following code causes GHC to panic.
-foldBagF :: forall term e a t.(Diff a,Typeable a, Ord a, Group t, DiffGroupReplace t, Typeable t, PFunTerm IFqS term, App2 IFqS term e) => (e a -> e t) -> e (Bag a) -> e t
-foldBagF = liftSO2 (Proxy @'[ '[a], '[] ]) $ fromPFun foldBagC
+foldBagF :: forall term e a t.(Typeable a, Ord a, Group t, Eq t, DiffGroupChange t, Typeable t, PFunTerm IFqS term, App2 IFqS term e) => (e (Fixed a) -> e t) -> e (Bag a) -> e t
+foldBagF f =
+  lift foldUListC . liftSO2 (Proxy @'[ '[(Fixed a, Sum Int)], '[] ]) (fromPFun convertMapC) (f . fstF)
+
+  -- liftSO2 (Proxy @'[ '[a], '[] ]) $ fromPFun foldBagC
 
 
 -- [???] I don't know but the following code causes GHC to panic.
-foldMapF :: forall term e k a t.(Diff a, Typeable a, Semigroup a, Ord k, Diff k, Typeable k, Abelian t, DiffGroupReplace t, Typeable t, PFunTerm IFqS term, App2 IFqS term e) => (e k -> e a -> e t) -> e (Map k a) -> e t
-foldMapF f = liftSO2 (Proxy @'[ '[(k,a)], '[] ]) (fromPFun foldMapC) (\ab -> f (fstF ab) (sndF ab))
-
-singletonBagI :: a -> (Bag a, a)
-singletonBagI a = (singletonBag a, a)
-
-singletonBagTr :: (Ord a, Diff a) => Delta a -> a -> (Delta (Bag a), a)
-singletonBagTr da a =
-  let !a' = a /+ da
-  in (replaceTo $ singletonBag a', a')
-
+foldMapF :: forall term e k a t.(DiffGroupChange a, Typeable a, Monoid a, Eq a, Ord k, Typeable k, Eq t, Abelian t, DiffGroupChange t, Typeable t, PFunTerm IFqS term, App2 IFqS term e) => (e (Fixed k) -> e a -> e t) -> e (Map (Fixed k) a) -> e t
+foldMapF f = -- liftSO2 (Proxy @'[ '[(k,a)], '[] ]) (fromPFun foldMapC) (\ab -> f (fstF ab) (sndF ab))
+  lift foldUListC . liftSO2 (Proxy @'[ '[(Fixed k,a)], '[] ]) (fromPFun convertMapC) (\ab -> f (fstF ab) (sndF ab))
 
 -- singletonBagTr ::
 --   Coercible (Delta a) a => Delta a -> Delta (Bag a)
 -- singletonBagTr da = DeltaBag (GroupChange (singletonBag $ coerce da))
 
 singletonBagF ::
-  (Typeable a, Ord a, Diff a,  App2 IFqS term e) => e a -> e (Bag a)
+  (Typeable a, Ord a, App2 IFqS term e) => e (Fixed a) -> e (Bag a)
 singletonBagF =
-  lift (fromFunctionsCode [|| singletonBagI ||] [|| singletonBagTr ||])
+  lift (fromStatelessCode (\a -> [|| singletonBag $$a ||]) (\a -> [|| singletonBagTr $$a ||]))
+  -- lift (fromFunctionsCode [|| singletonBagI ||] [|| singletonBagTr ||])
   -- lift (fromStatelessCode (\a -> [|| singletonBag $$a ||]) (\da -> [|| singletonBagTr $$da ||]))
 
-singletonMapI :: (k, v) -> (Map k v, (k,v))
-singletonMapI (k, v) = (Map (M.singleton k v), (k, v))
-
-singletonMapTr :: (Ord k, Diff k, Diff v, Group v) => Delta (k, v) -> (k, v) -> (Delta (Map k v), (k, v))
-singletonMapTr (PairDelta dk dv) (k, v) =
-    let k' = k /+ dk
-        v' = v /+ dv
-    in (replaceTo (Map (M.singleton k' v')), (k',v'))
+fstFixedF :: (App IFqS e, Typeable a, Typeable b) => e (Fixed (a, b)) -> e (Fixed a)
+fstFixedF = lift fstFixedC
+sndFixedF :: (App IFqS e, Typeable a, Typeable b) => e (Fixed (a, b)) -> e (Fixed b)
+sndFixedF = lift sndFixedC
 
 singletonMapF ::
-  (App IFqS e, Group v, Diff v, Diff k, Ord k,
+  (App IFqS e, Group v, DiffGroupChange v, Eq v, Ord k,
    Typeable v, Typeable k) =>
-  e k -> e v -> e (Map k v)
+  e (Fixed k) -> e v -> e (Map (Fixed k) v)
 singletonMapF k v =
   lift (fromFunctionsCode [|| singletonMapI ||] [|| singletonMapTr ||]) $ pair k v
 
 mapReduce ::
   forall term e k1 v1 k2 v2 v3 .
   (App2 IFqS term e, PFunTerm IFqS term,
-    Typeable k1, Diff k1, Ord k1,
-    Typeable v1, Diff v1, Semigroup v1,
-    Typeable k2, Ord k2, Diff k2,
-    Ord v2, Typeable v2, Diff v2,
-    Typeable v3, Abelian v3, Diff v3) =>
-  (e k1 -> e v1 -> e (Bag (k2, v2))) -> (e k2 -> e (Bag v2) -> e v3) -> e (Map k1 v1) -> e (Map k2 v3)
+    Typeable k1, Ord k1,
+    Typeable v1, DiffGroupChange v1, Monoid v1, Eq v1,
+    Typeable k2, Ord k2,
+    Ord v2, Typeable v2,
+    Typeable v3, Abelian v3, DiffGroupChange v3, Eq v3) =>
+  (e (Fixed k1) -> e v1 -> e (Bag (k2, v2))) -> (e (Fixed k2) -> e (Bag v2) -> e v3) -> e (Map (Fixed k1) v1) -> e (Map (Fixed k2) v3)
 mapReduce mapper reducer = reducePerKey . groupByKey . mapPerKey
   where
-    mapPerKey :: e (Map k1 v1) -> e (Bag (k2, v2))
+    mapPerKey :: e (Map (Fixed k1) v1) -> e (Bag (k2, v2))
     mapPerKey  = foldMapF mapper
-    groupByKey :: e (Bag (k2, v2)) -> e (Map k2 (Bag v2))
+    groupByKey :: e (Bag (k2, v2)) -> e (Map (Fixed k2) (Bag v2))
     groupByKey = foldBagF (\kv ->
-                             share (fstF kv) $ \key ->
-                             share (sndF kv) $ \val ->
+                             share (fstFixedF kv) $ \key ->
+                             share (sndFixedF kv) $ \val ->
                              singletonMapF key (singletonBagF val))
-    reducePerKey :: e (Map k2 (Bag v2)) -> e (Map k2 v3)
+    reducePerKey :: e (Map (Fixed k2) (Bag v2)) -> e (Map (Fixed k2) v3)
     reducePerKey = foldMapF (\key bag -> singletonMapF key (reducer key bag))
 
 constF :: (Diff n, Typeable n, TH.Lift n, App IFqS e) => n -> e n
@@ -138,26 +130,29 @@ newtype MyInt = MyInt Int
   deriving stock TH.Lift
   deriving (Semigroup, Monoid, Group, Abelian) via Sum Int
 
-newtype instance Delta MyInt = DeltaMyInt (GroupChangeWithReplace MyInt)
+newtype instance Delta MyInt = DeltaMyInt (GroupChange MyInt)
   deriving newtype (Semigroup, Monoid)
 
-deriving via FromMonoid MyInt instance Diff MyInt
-deriving via FromMonoid MyInt instance DiffMinus MyInt
-deriving via FromMonoid MyInt instance DiffReplace MyInt
+deriving via WithGroupChange MyInt instance Diff MyInt
+deriving via WithGroupChange MyInt instance DiffMinus MyInt
+deriving via WithGroupChange MyInt instance DiffGroupChange MyInt
 
-instance DiffGroupReplace MyInt
 
+pairFixedF :: (Typeable a, Typeable b, App IFqS e) => e (Fixed a) -> e (Fixed b) -> e (Fixed (a, b))
+pairFixedF x y = lift pairFixedC (pair x y)
+
+unfixedF :: (Typeable a, Diff a, App IFqS e) => e (Fixed a) -> e a
+unfixedF = lift unfixedC
 
 histogram ::
   forall e term w.
-  (Diff w, Typeable w, Ord w, App2 IFqS term e, PFunTerm IFqS term)
-  => e (Map Int (Bag w)) -> e (Map w MyInt)
+  (Typeable w, Ord w, App2 IFqS term e, PFunTerm IFqS term)
+  => e (Map (Fixed Int) (Bag w)) -> e (Map (Fixed w) MyInt)
 histogram = mapReduce hmap hreduce
   where
-    hmap :: e Int -> e (Bag w) -> e (Bag (w, MyInt))
-    hmap    _ = foldBagF (\n -> singletonBagF (pair n (constF 1)))
-    hreduce :: e w -> e (Bag MyInt) -> e MyInt
-    hreduce _ = foldBagF id
-
+    hmap :: e (Fixed Int) -> e (Bag w) -> e (Bag (w, MyInt))
+    hmap    _ = foldBagF (\n -> singletonBagF (pairFixedF n (constF 1)))
+    hreduce :: e (Fixed w) -> e (Bag MyInt) -> e MyInt
+    hreduce _ = foldBagF unfixedF
 
 

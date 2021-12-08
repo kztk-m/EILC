@@ -16,13 +16,13 @@ import           Data.IFqTU
 import           Language.Unembedding
 
 import           Data.Incrementalized
-import           Data.Incrementalized.Numeric
+import           Data.Incrementalized.Numeric     ()
 import           Data.Proxy
 
 import           Data.Incrementalized.Bool
 
-import           Data.DeltaSpec
-import           Data.Incrementalized.NumericSpec
+import           Data.DeltaSpec                   ()
+import           Data.Incrementalized.NumericSpec ()
 import           Data.IncrementalizedSpec
 
 import           Test.Hspec
