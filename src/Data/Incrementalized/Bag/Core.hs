@@ -17,7 +17,7 @@ module Data.Incrementalized.Bag.Core
     Map(..), Bag, Delta(..),
 
     Fixed(..),
-    fstFixedC, sndFixedC, pairFixedC, unfixedC,
+    fstFixedC, sndFixedC, pairFixedC, getFixedC,
 
     foldBag, myFoldMap,
 
@@ -64,27 +64,10 @@ import           Data.Conn
 import           Data.Function                 (on)
 import           Data.JoinList                 as JL
 import           Data.Monoid                   (Sum)
-import           Language.Haskell.TH.Syntax    (Lift)
 import           Language.Unembedding
 
+import           Data.Incrementalized.Fixed
 
-newtype Fixed a = Fixed { getFixed :: a }
-  deriving newtype (Num, Ord, Eq, Semigroup, Monoid, Group, Abelian)
-  deriving stock   (Show, Functor, Foldable, Traversable, Lift)
-
-data instance Delta (Fixed a) = NoUpdate
-  deriving stock Show
-
-instance Semigroup (Delta (Fixed a)) where
-  _ <> _ = NoUpdate
-
-instance Monoid (Delta (Fixed a)) where
-  mempty = NoUpdate
-
-
-instance Diff (Fixed a) where
-  a /+ _ = a
-  checkEmpty _ = True
 
 -- | A map to be folded.
 newtype Map k a = Map (M.Map k a)
@@ -113,18 +96,6 @@ instance (Monoid a, Ord k, Eq a) => Eq (Map (Fixed k) a) where
 deriving via WithGroupChange (Map (Fixed k) a) instance (Monoid a, Ord k, Eq a) => Diff (Map (Fixed k) a)
 deriving via WithGroupChange (Map (Fixed k) a) instance (Group a, Ord k, Eq a) => DiffMinus (Map (Fixed k) a)
 deriving via WithGroupChange (Map (Fixed k) a) instance (Monoid a, Ord k, Eq a) => DiffGroupChange (Map (Fixed k) a)
-
-fstFixedC :: IFqS (Fixed (a, b)) (Fixed a)
-fstFixedC = fromStatelessCode (\a -> [|| Fixed $ fst (getFixed $$a) ||]) (const [|| mempty ||])
-
-sndFixedC :: IFqS (Fixed (a, b)) (Fixed b)
-sndFixedC = fromStatelessCode (\a -> [|| Fixed $ snd (getFixed $$a) ||]) (const [|| mempty ||])
-
-pairFixedC :: IFqS (Fixed a, Fixed b) (Fixed (a, b))
-pairFixedC = fromStatelessCode (\x -> [|| let (Fixed a, Fixed b) = $$x in Fixed (a, b) ||]) (const [|| mempty ||])
-
-unfixedC :: Diff a => IFqS (Fixed a) a
-unfixedC = fromStatelessCode (\x -> [|| getFixed $$x ||]) (const [|| mempty ||])
 
 -- instance (Semigroup a, Ord k) => Semigroup (Map k a) where
 --   Map as <> Map bs = Map $ M.unionWith (<>) as bs

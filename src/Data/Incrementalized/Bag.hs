@@ -15,7 +15,7 @@
 
 module Data.Incrementalized.Bag
   (
-    Fixed(..), fstFixedF, sndFixedF, pairFixedF, unfixedF,
+    module Data.Incrementalized.Fixed,
 
     Bag, Map(..), Delta(..),
 
@@ -48,6 +48,7 @@ import           Data.Delta
 import           Data.Group
 import           Data.Incrementalized                (fromFunctionsCode,
                                                       fromStatelessCode)
+import           Data.Incrementalized.Fixed
 import           Data.Incrementalized.Function
 import           Data.Incrementalized.Group
 import           Data.Incrementalized.Numeric
@@ -57,7 +58,6 @@ import           Data.Typeable                       (Typeable)
 import qualified Language.Haskell.TH.Syntax          as TH
 import           Language.Unembedding
 import           Language.Unembedding.PseudoFunction
-
 
 import           Data.Incrementalized.Bag.Core
 
@@ -87,10 +87,6 @@ singletonBagF =
   -- lift (fromFunctionsCode [|| singletonBagI ||] [|| singletonBagTr ||])
   -- lift (fromStatelessCode (\a -> [|| singletonBag $$a ||]) (\da -> [|| singletonBagTr $$da ||]))
 
-fstFixedF :: (App IFqS e, Typeable a, Typeable b) => e (Fixed (a, b)) -> e (Fixed a)
-fstFixedF = lift fstFixedC
-sndFixedF :: (App IFqS e, Typeable a, Typeable b) => e (Fixed (a, b)) -> e (Fixed b)
-sndFixedF = lift sndFixedC
 
 singletonMapF ::
   (App IFqS e, Group v, DiffGroupChange v, Eq v, Ord k,
@@ -138,12 +134,6 @@ deriving via WithGroupChange MyInt instance DiffMinus MyInt
 deriving via WithGroupChange MyInt instance DiffGroupChange MyInt
 
 
-pairFixedF :: (Typeable a, Typeable b, App IFqS e) => e (Fixed a) -> e (Fixed b) -> e (Fixed (a, b))
-pairFixedF x y = lift pairFixedC (pair x y)
-
-unfixedF :: (Typeable a, Diff a, App IFqS e) => e (Fixed a) -> e a
-unfixedF = lift unfixedC
-
 histogram ::
   forall e term w.
   (Typeable w, Ord w, App2 IFqS term e, PFunTerm IFqS term)
@@ -153,6 +143,6 @@ histogram = mapReduce hmap hreduce
     hmap :: e (Fixed Int) -> e (Bag w) -> e (Bag (w, MyInt))
     hmap    _ = foldBagF (\n -> singletonBagF (pairFixedF n (constF 1)))
     hreduce :: e (Fixed w) -> e (Bag MyInt) -> e MyInt
-    hreduce _ = foldBagF unfixedF
+    hreduce _ = foldBagF getFixedF
 
 

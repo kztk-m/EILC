@@ -48,13 +48,13 @@ propBagOk = do
 
 simpleSumBag :: IncrementalizedFunc (Bag (Sum Int)) (Sum Int)
 simpleSumBag = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \x ->
-                     foldBagF unfixedF x )
+                     foldBagF getFixedF x )
 
 simpleSumBag2 :: IncrementalizedFunc (Sum Int, Bag (Sum Int)) (Sum Int)
 simpleSumBag2 = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \xy ->
                       share (fstF xy) $ \a ->
                       share (sndF xy) $ \bs ->
-                      foldBagF (\b -> a + unfixedF b) bs )
+                      foldBagF (\b -> a + getFixedF b) bs )
 
 sumBags :: IncrementalizedFunc (Bag (Sum Int), Bag (Sum Int)) (Sum Int)
 sumBags = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \x ->
@@ -62,7 +62,7 @@ sumBags = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \x ->
                 share (sndF x) $ \b ->
                 flip foldBagF a $ \e ->
                 flip foldBagF b $ \e' ->
-                unfixedF e + unfixedF e' )
+                getFixedF e + getFixedF e' )
 
 
 

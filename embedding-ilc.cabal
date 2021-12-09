@@ -64,6 +64,7 @@ library
         Data.Env        
         Data.Interaction 
         Data.Incrementalized
+        Data.Incrementalized.Fixed 
         Data.Incrementalized.Numeric 
         Data.Incrementalized.Function 
         Data.Incrementalized.Bool
