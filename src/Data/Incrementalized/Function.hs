@@ -208,18 +208,18 @@ instance PFunTerm IFqS IFqT where
         lamTr :: Code (Delta a -> Env Identity (Flatten cs) -> DFunc as (Delta b, Env Identity (Flatten cs))) <-
             mkLetMono [||
                   -- inefficiency: denv may contain unused variables.
-                  \da c -> $$(mkAbsD_ tenv $ \denv -> toCode $ do
+                  \_da c -> $$(mkAbsD_ tenv $ \denv -> toCode $ do
                       cs <- CodeC $ cenv2conn sh [|| c ||]
-                      (db, cs') <- tr (ECons (PackedCodeDelta [|| da ||]) denv) cs
+                      (db, cs') <- tr (ECons (PackedCodeDelta [|| _da ||]) denv) cs
                       return [|| ($$db, $$(conn2cenv cs') `asType` c) ||])
                 ||]
         let
           h ::  Env PackedCodeDiff as -> Code (PFun IFqS (Env Identity (Flatten cs)) a b)
           h env =
             [|| PFunIFqS $ FunCache $$(mkIsClosed tenv)
-              (\a -> $$(toCode $ do
-                        (b, cs) <- f (ECons (PackedCodeDiff [|| a ||]) env)
-                        return [|| ($$b, $$(conn2cenv cs) ) ||]))
+              (\_a -> $$(toCode $ do
+                            (b, cs) <- f (ECons (PackedCodeDiff [|| _a ||]) env)
+                            return [|| ($$b, $$(conn2cenv cs) ) ||]))
               (\da c ->
                   if checkEmpty da then
                     (mempty, c)
@@ -294,17 +294,17 @@ instance PFunTerm IFqS IFqTU where
       (f, tr) <- m
       lamTr :: Code (Delta a -> Env Identity (Flatten cs) -> DFunc (Extr as (SafeTail us)) (Delta b, Env Identity (Flatten cs))) <-
         mkLetMono [||
-                  \da c -> $$(mkAbsD (extractEnv tenv u') $ \denv -> toCode $ do
+                  \_da c -> $$(mkAbsD (extractEnv tenv u') $ \denv -> toCode $ do
                       cs <- CodeC $ cenv2conn sh [|| c ||]
-                      (db, cs') <- tr (extendEnv tenv u (PackedCodeDelta [|| da ||]) denv) cs
+                      (db, cs') <- tr (extendEnv tenv u (PackedCodeDelta [|| _da ||]) denv) cs
                       return [|| ($$db, $$(conn2cenv cs') `asType` c) ||])
           ||]
       let h ::  Env PackedCodeDiff (Extr as (SafeTail us)) -> Code (PFun IFqS (Env Identity (Flatten cs)) a b)
           h env =
             [|| PFunIFqS $ FunCache $$(mkIsClosed $ extractEnv tenv u')
-              (\a -> $$(toCode $ do
-                        (b, cs) <- f (extendEnv tenv u (PackedCodeDiff [|| a ||]) env)
-                        return [|| ($$b, $$(conn2cenv cs) ) ||]))
+              (\_a -> $$(toCode $ do
+                            (b, cs) <- f (extendEnv tenv u (PackedCodeDiff [|| _a ||]) env)
+                            return [|| ($$b, $$(conn2cenv cs) ) ||]))
               (\da c ->
                   if checkEmpty da then
                     (mempty, c)
