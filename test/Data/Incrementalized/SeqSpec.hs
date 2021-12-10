@@ -24,6 +24,7 @@ import qualified Control.Monad
 import           Data.DeltaSpec
 import           Data.Incrementalized.NumericSpec ()
 import           Data.IncrementalizedSpec
+import           Test.Hspec.QuickCheck            (modifyMaxSize)
 
 arbitraryNN :: (Num a, Ord a, Arbitrary a) => Gen a
 arbitraryNN = getNonNegative <$> arbitrary
@@ -65,7 +66,7 @@ concatInc= $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) concatF)
 
 
 cartesianFOk :: Spec
-cartesianFOk = do
+cartesianFOk = modifyMaxSize (min 10) $ do
   it "cartesianF is incrementalized" $ do
     propIncrementalizedFunc cartesian
   it "cartesianF implements cartesian products" $ do
@@ -73,7 +74,7 @@ cartesianFOk = do
      fst (cartesian (a,b)) === ((,) <$> a <*> b)
 
 concatIncOk :: Spec
-concatIncOk = do
+concatIncOk = modifyMaxSize (min 20) $ do
   it "concatInc is incrementalized" $ do
     propIncrementalizedFunc concatInc
   it "concnatInc concats sequences" $ do
