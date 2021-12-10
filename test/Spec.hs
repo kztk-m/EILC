@@ -13,6 +13,7 @@ import           Data.Incrementalized.BoolSpec
 import           Data.Incrementalized.FunctionSpec
 import           Data.Incrementalized.GroupSpec
 import           Data.Incrementalized.NumericSpec
+import           Data.Incrementalized.SeqSpec
 import           Test.Hspec
 
 
@@ -23,3 +24,4 @@ main = hspec $ do
   testNumeric
   testBool
   testBag
+  testSeq

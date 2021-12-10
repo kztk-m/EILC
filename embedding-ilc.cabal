@@ -64,6 +64,7 @@ library
         Data.Env        
         Data.Interaction 
         Data.Incrementalized
+        Data.Incrementalized.Seq
         Data.Incrementalized.Fixed 
         Data.Incrementalized.Numeric 
         Data.Incrementalized.Function 
@@ -84,10 +85,10 @@ library
 
     other-modules:
         Data.Code.CodeType
+        -- To avoid GHC's bug.
         Data.Incrementalized.Bag.Core
+        Data.Incrementalized.Seq.Core
 
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
     hs-source-dirs:   src
 
     if impl(ghc >= 9) 
@@ -140,7 +141,8 @@ test-suite embedding-ilc-test
         Data.Incrementalized.BoolSpec 
         Data.Incrementalized.BagSpec 
         Data.Incrementalized.FunctionSpecCore
-
+        Data.Incrementalized.SeqSpec 
+        
     if flag(dump) 
         ghc-options: 
             -dppr-cols=200 -dsuppress-all -ddump-to-file -ddump-splices -ddump-simpl

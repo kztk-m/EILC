@@ -10,56 +10,79 @@
 import           Examples.Sequence
 
 import           Control.DeepSeq
+import           Control.Monad                (join)
 import           Criterion.Main
-import qualified Data.Sequence     as S
+import qualified Data.Sequence                as S
 
 import           Data.Delta
 import           Data.Interaction
 
-import           Data.List         (foldl')
+import           Data.List                    (foldl')
 
 -- import           Data.IFFT         (IFFT)
-import           Data.IFqT         (IFqT)
-import           Data.IFqTU        (IFqTU)
+import           Data.IFqT                    (IFqT)
+import           Data.IFqTU                   (IFqTU)
 
-import           Data.IF           (IFT)
-import           Data.Proxy        (Proxy (..))
+import           Data.IF                      (IFT)
+import           Data.Incrementalized.Group
+import           Data.Incrementalized.Numeric
+import           Data.Incrementalized.Seq     as IS
+import           Data.Proxy                   (Proxy (..))
 
-sequence1 :: S Int
-sequence1 = S $ S.fromList [1..100]
+import           Data.JoinList
 
-sequence2 :: S Int
-sequence2 = S $ S.fromList [1..100]
+sequence1 :: Seq Int
+sequence1 = IS.fromList [1..100]
 
-instance (NFData a, NFData (Delta a)) => NFData (AtomicDelta (S a)) where
+sequence2 :: Seq Int
+sequence2 = IS.fromList [1..100]
+
+instance NFData a => NFData (Seq a) where
+  rnf (Seq a) = rnf a
+
+instance NFData a => NFData (JoinList a) where
+  rnf JLNil          = ()
+  rnf (JLNonEmpty a) = rnf a
+
+instance NFData a => NFData (JoinListNE a) where
+  rnf (JLSingle a)   = rnf a
+  rnf (JLJoin xs ys) = rnf (xs, ys)
+
+instance (NFData a, NFData (Delta a)) => NFData (AtomicDelta (Seq a)) where
   rnf (SIns _ s)     = rnf s
   rnf (SDel _ _)     = ()
   rnf (SRep _ da)    = rnf da
   rnf (SRearr _ _ _) = ()
 
+instance (NFData a, NFData (Delta a)) => NFData (Delta (Seq a)) where
+  rnf (DeltaSeq a) = rnf a
+
 instance (NFData (Delta a), NFData (Delta b)) => NFData (Delta (a, b)) where
   rnf (PairDelta da db) = rnf (da, db)
 
 instance NFData (Delta Int) where
-  rnf (DInt x) = rnf x
+  rnf (DeltaInt x) = rnf x
 
-mkInitSequence :: Int -> S Int
-mkInitSequence n = S $ S.fromList $ take n [1..]
+instance NFData a => NFData (GroupChange a) where
+  rnf (GroupChange a) = rnf a
 
-mkInitSequences :: Int -> (S Int, S Int)
+mkInitSequence :: Int -> Seq Int
+mkInitSequence n = IS.fromList $ take n [1..]
+
+mkInitSequences :: Int -> (Seq Int, Seq Int)
 mkInitSequences n = (mkInitSequence n, mkInitSequence n)
 
-insOuter :: Int -> [Delta (S Int, S Int)]
+insOuter :: Int -> [Delta (Seq Int, Seq Int)]
 insOuter n = [ injDelta $ ADFst $ mkCons i | i <- ns ]
   where
     ns = take n [1..] -- this is different from [1..n]
-    mkCons e = SIns 0 (S $ S.singleton e)
+    mkCons e = SIns 0 (Seq $ S.singleton e)
 
-insInner :: Int -> [Delta (S Int, S Int)]
+insInner :: Int -> [Delta (Seq Int, Seq Int)]
 insInner n = [ injDelta $ ADSnd $ mkCons i | i <- ns ]
   where
     ns = take n [1..] -- this is different from [1..n]
-    mkCons e = SIns 0 (S $ S.singleton e)
+    mkCons e = SIns 0 (Seq $ S.singleton e)
 
 -- ops :: Int -> [Delta (S Int, S Int)]
 -- ops n =
@@ -77,8 +100,8 @@ tryInc h initial ds =
       !dres = iterations it ds
   in foldl' (/+) res dres
 
-tryScratch :: (NFData b, Diff a) => (a -> (b, Interaction (Delta a) (Delta b))) -> a -> [Delta a] -> b
-tryScratch h = go (fst . h)
+tryScratch :: (NFData b, Diff a) => (a -> b) -> a -> [Delta a] -> b
+tryScratch = go
   where
     go f a [] = f a
     go f a (da : ds) =
@@ -86,13 +109,17 @@ tryScratch h = go (fst . h)
       in f a' `deepseq` go f a' ds
 
 
+cartesianS :: (Seq Int, Seq Int) -> Seq (Int, Int)
+cartesianS (xs, ys) =
+  join $ fmap (\x -> fmap (\y -> (x,y)) ys) xs
 
-dCartesianT, dCartesianTHO, dCartesianTU, dCartesianRaw :: (S Int, S Int) -> (S (Int, Int), Interaction (Delta (S Int, S Int)) (Delta (S (Int, Int))))
+dCartesianT, dCartesianTU, dCartesianRaw ::
+  (Seq Int, Seq Int) -> (Seq (Int, Int), Interaction (Delta (Seq Int, Seq Int)) (Delta (Seq (Int, Int))))
 
 dCartesianT   = $$( testCode (Proxy :: Proxy IFqT) )
-dCartesianTHO = $$( testCodeHO (Proxy :: Proxy IFqT) )
-dCartesianTU  = $$( testCodeHO (Proxy :: Proxy IFqTU) )
-dCartesianRaw = testCodeHORaw (Proxy :: Proxy IFT)
+-- dCartesianTHO = $$( testCodeHO (Proxy :: Proxy IFqT) )
+dCartesianTU  = $$( testCode (Proxy :: Proxy IFqTU) )
+dCartesianRaw = testCodeRaw (Proxy :: Proxy IFT)
 -- dCartesianTE  = $$( testCode (Proxy :: Proxy IFqTE ) )
 -- dCartesianTEUS = $$( testCode (Proxy :: Proxy IFqTEUS ) )
 -- dCartesianF   = $$( testCode (Proxy :: Proxy IFFT ) )
@@ -102,14 +129,13 @@ forProf :: ()
 forProf =
   rnf $ tryInc dCartesianTU (mkInitSequences 1000) (insOuter 100 <> insInner 100)
 
-doBench :: String -> (S Int, S Int) -> [Delta (S Int, S Int)] -> Benchmark
+doBench :: String -> (Seq Int, Seq Int) -> [Delta (Seq Int, Seq Int)] -> Benchmark
 doBench gname a0 ds =
   env (return (a0, ds)) $ \ ~(a0', ds') ->
     bgroup gname [
-      bench "Scratch" $ nf (tryScratch dCartesianT a0') ds',
+      bench "Scratch" $ nf (tryScratch cartesianS a0') ds',
       bench "T"       $ nf (tryInc dCartesianT a0') ds' ,
-      bench "THO"     $ nf (tryInc dCartesianTHO a0') ds',
-      bench "THO-Opt" $ nf (tryInc dCartesianTU  a0') ds',
+      bench "T-Opt"   $ nf (tryInc dCartesianTU  a0') ds',
       bench "Raw"     $ nf (tryInc dCartesianRaw a0') ds'
     ]
 

@@ -54,7 +54,7 @@ simpleSumBag2 :: IncrementalizedFunc (Sum Int, Bag (Sum Int)) (Sum Int)
 simpleSumBag2 = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \xy ->
                       share (fstF xy) $ \a ->
                       share (sndF xy) $ \bs ->
-                      foldBagF (\b -> a + getFixedF b) bs )
+                      foldBagF (\b -> a * getFixedF b) bs )
 
 sumBags :: IncrementalizedFunc (Bag (Sum Int), Bag (Sum Int)) (Sum Int)
 sumBags = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \x ->
@@ -62,7 +62,7 @@ sumBags = $$( compileCode $ runMonoWith (Proxy :: Proxy IFqTU) $ \x ->
                 share (sndF x) $ \b ->
                 flip foldBagF a $ \e ->
                 flip foldBagF b $ \e' ->
-                getFixedF e + getFixedF e' )
+                getFixedF e * getFixedF e' )
 
 
 
@@ -80,20 +80,19 @@ simpleSumBag2Ok = do
     propIncrementalizedFunc simpleSumBag2
   it "simpleSumBag2 correct" $ do
     property $ \(x,b) ->
-     fst (simpleSumBag2 (x,b)) === foldBag (( x + ) Prelude.. getFixed ) b
+     fst (simpleSumBag2 (x,b)) === foldBag (( x * ) Prelude.. getFixed ) b
 
-
--- sumBagsOk :: Spec
--- sumBagsOk = do
---   it "sumBags is incrementalized" $ do
---     propIncrementalizedFunc sumBags
---   it "sumBags sums bags"  $ do
---     property $ \(b1, b2) ->
---       fst (sumBags (b1,b2)) === (flip foldBag b1 $ \e -> flip foldBag b2 $ \e' -> e + e' )
+sumBagsOk :: Spec
+sumBagsOk = do
+  it "sumBags is incrementalized" $ do
+    propIncrementalizedFunc sumBags
+  it "sumBags sums bags"  $ do
+    property $ \(b1, b2) ->
+      fst (sumBags (b1,b2)) === (flip foldBag b1 $ \e -> flip foldBag b2 $ \e' -> getFixed e * getFixed e')
 
 testBag :: Spec
 testBag = describe "Bag related properties" $ do
   propBagOk
   simpleSumBagOk
   simpleSumBag2Ok
---  sumBagsOk
+  sumBagsOk
