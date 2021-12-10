@@ -63,13 +63,15 @@ import           Data.Incrementalized.Bag.Core
 
 
 
--- [???] I don't know but the following code causes GHC to panic.
-foldBagF :: forall term e a t.(Typeable a, Ord a, Group t, Eq t, DiffGroupChange t, Typeable t, PFunTerm IFqS term, App2 IFqS term e) => (e (Fixed a) -> e t) -> e (Bag a) -> e t
-foldBagF f =
-  lift foldUListC . liftSO2 (Proxy @'[ '[(Fixed a, Sum Int)], '[] ]) (fromPFun convertMapC) (f . fstF)
+-- -- [???] I don't know but the following code causes GHC to panic.
+-- foldBagF :: forall term e a t.(Typeable a, Ord a, Group t, Eq t, DiffGroupChange t, Typeable t, PFunTerm IFqS term, App2 IFqS term e) => (e (Fixed a) -> e t) -> e (Bag a) -> e t
+-- foldBagF f =
+--   lift foldUListC . liftSO2 (Proxy @'[ '[(Fixed a, Sum Int)], '[] ]) (fromPFun convertMapC) (f . fstF)
+
+foldBagF :: forall term e a t.(Typeable a, Ord a, Abelian t, Eq t, DiffGroupChange t, Typeable t, PFunTerm IFqS term, App2 IFqS term e) => (e (Fixed a) -> e t) -> e (Bag a) -> e t
+foldBagF h = foldMapF (\x y -> lift powC $ pair (h x) y)
 
   -- liftSO2 (Proxy @'[ '[a], '[] ]) $ fromPFun foldBagC
-
 
 -- [???] I don't know but the following code causes GHC to panic.
 foldMapF :: forall term e k a t.(DiffGroupChange a, Typeable a, Monoid a, Eq a, Ord k, Typeable k, Eq t, Abelian t, DiffGroupChange t, Typeable t, PFunTerm IFqS term, App2 IFqS term e) => (e (Fixed k) -> e a -> e t) -> e (Map (Fixed k) a) -> e t

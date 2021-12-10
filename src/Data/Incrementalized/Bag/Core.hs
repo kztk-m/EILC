@@ -30,7 +30,7 @@ module Data.Incrementalized.Bag.Core
     convertMap, convertMapC, ConvertMapCache(..),
     convertMapInit, convertMapTr,
 
-
+    powC, powInit, powTr,
   )
   -- (
   --   Bag(..), singletonBag, Delta(..),
@@ -56,6 +56,7 @@ import           Data.IFq
 import           Data.Incrementalized
 import           Data.Incrementalized.Function
 import           Data.Incrementalized.Group
+import           Data.Incrementalized.Numeric
 import qualified Data.Map.Strict               as M
 
 
@@ -63,10 +64,11 @@ import           Data.Code
 import           Data.Conn
 import           Data.Function                 (on)
 import           Data.JoinList                 as JL
-import           Data.Monoid                   (Sum)
+import           Data.Monoid                   (Sum (..))
 import           Language.Unembedding
 
 import           Data.Incrementalized.Fixed
+import           Data.Typeable                 (Typeable)
 
 
 -- | A map to be folded.
@@ -321,8 +323,8 @@ convertMapC = fromStatelessCode (\a -> [|| convertMapInit $$a ||]) (\da -> [|| c
 
 type Bag a = Map (Fixed a) (Sum Int)
 
-foldBag :: Monoid t => (Fixed k -> t) -> Bag k -> t
-foldBag f = foldUList . convertMap (\k _ -> f k)
+foldBag :: Group t => (Fixed k -> t) -> Bag k -> t
+foldBag f = foldUList . convertMap (\k v -> f k `pow` getSum v)
 
 
 myFoldMap :: Monoid c => (k -> a -> c) -> Map k a -> c
@@ -350,6 +352,26 @@ singletonMapTr (PairDelta _ dv) k = (DMap $ Map $ M.singleton k v, k)
     -- let k' = k /+ dk
     --     v' = v /+ dv
     -- in (replaceTo (Map (M.singleton k' v')), (k',v'))
+
+powInit :: Abelian t => (t, Sum Int) -> (t, (t, Int))
+powInit (t, Sum n) = (pow t n, (t, n))
+
+powTr ::
+  (Abelian t, DiffGroupChange t) =>
+  Delta (t, Sum Int)
+  -> (t, Int)
+  -> (Delta t, (t, Int))
+powTr (PairDelta dt dn) (t, n) = (fromGroupChange $ GroupChange r, (t', n'))
+  where
+    GroupChange (Sum dn_) = toGroupChange dn
+    GroupChange dt_ = toGroupChange dt
+    r  = pow t dn_ <> pow dt_ n <> pow dt_ dn_
+    n' = getSum (Sum n /+ dn)
+    t' = t /+ dt
+
+powC :: (Abelian t, DiffGroupChange t, Typeable t) => IFqS (t, Sum Int) t
+powC = fromFunctionsCode [|| powInit ||] [|| powTr ||]
+
 
 
 -- convertMapI :: (k -> a -> (t, c)) -> Map k a -> (UList t, M.Map k c)
