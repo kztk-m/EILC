@@ -45,7 +45,10 @@ packages:
 # - git: https://github.com/commercialhaskell/stack.git
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
 #
-# extra-deps: []
+extra-deps: 
+- hspec-2.9.2@sha256:03c074bcadf13bdb5fda795fcce9f83a9532685d084bb0a325fdd632c3655a76,1709
+- hspec-core-2.9.2@sha256:5ceab250e27469d775154d4d331e41e5805b0aa18567f4792ecbf8de2ce33c63,5563
+- hspec-discover-2.9.2@sha256:19d259b90dfaf71449fede71a0e850cf16b57493d74624ffddf8cd67bcec8032,2167
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
