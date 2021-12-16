@@ -22,6 +22,8 @@ module Data.Incrementalized.Bool
 
     IfTerm(..), if_,
 
+    notF, notC,
+
   ) where
 
 import           Prelude                             hiding (id, (.))
@@ -42,7 +44,9 @@ import           Language.Unembedding.PseudoFunction
 
 -- As an interesting case study, here we handle Booleans here.
 
-import           Data.Incrementalized                (IncrementalizedQ)
+-- As an interesting case study, here we handle Booleans here.
+import           Data.Incrementalized                (IncrementalizedQ,
+                                                      fromStatelessCode)
 import           Data.Incrementalized.Function
 
 -- $setup
@@ -90,6 +94,12 @@ instance Diff Bool where
 
 instance DiffMinus Bool where
   x /- y = if x == y then DBKeep else DBNot
+
+notC :: IFqS Bool Bool
+notC = fromStatelessCode (\a -> [|| not $$a ||]) id
+
+notF :: App IFqS e => e Bool -> e Bool
+notF = lift notC
 
 
 type Lazy cat c a = PFun cat c () a

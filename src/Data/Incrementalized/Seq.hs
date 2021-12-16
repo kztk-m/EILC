@@ -15,11 +15,14 @@ module Data.Incrementalized.Seq
   (
     Seq(..), Delta(..), AtomicDelta(..), fromList,
 
-    singletonF, emptyF, concatF, mapF,
+    singletonF, emptyF, nullF, appendF, concatF, mapF, filterF,
 
     -- * Component functions
-    singletonTr, concatInit, concatTrAtomic, MapCache(..),
+    singletonTr, nullInit, nullTrAtomic,
+    appendInit, appendTrAtomic, AppendCache,
+    concatInit, concatTrAtomic, MapCache(..),
     mapInit, mapTr, mapTrChanged, mapTrUnchangedAtomic,
+    filterInit, filterTr, filterTrChanged, filterTrUnchangedAtomic,
   ) where
 
 import           Prelude                             hiding (id, (.))
@@ -41,3 +44,10 @@ mapF ::
   => (e a -> e b) -> e (Seq a) -> e (Seq b)
 mapF =
   Unemb.liftSO2 (Proxy @'[ '[a], '[] ]) (fromPFun mapC)
+
+filterF ::
+  forall term e a.
+  (Diff a, Typeable a, PFunTerm IFqS term, App2 IFqS term e)
+  => (e a -> e Bool) -> e (Seq a) -> e (Seq a)
+filterF =
+  Unemb.liftSO2 (Proxy @'[ '[a], '[] ]) (fromPFun filterC)

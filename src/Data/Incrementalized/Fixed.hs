@@ -18,6 +18,8 @@ module Data.Incrementalized.Fixed
 import           Data.Group
 import           Language.Haskell.TH.Syntax (Lift)
 
+import           Data.String
+
 import           Data.Delta
 import           Data.IFq
 import           Data.Incrementalized
@@ -26,7 +28,7 @@ import           Language.Unembedding
 
 -- | @Fixed a@ is a variant of @a@ to which changes are always the empty change.
 newtype Fixed a = Fixed { getFixed :: a }
-  deriving newtype (Num, Ord, Eq, Enum, Bounded, Semigroup, Monoid, Group, Abelian)
+  deriving newtype (Num, Ord, Eq, Enum, Bounded, IsString, Semigroup, Monoid, Group, Abelian)
   deriving stock   (Show, Read, Functor, Foldable, Traversable, Lift)
 
 -- | @NoUpdate@ is only the change allowed for @Fixed a@.

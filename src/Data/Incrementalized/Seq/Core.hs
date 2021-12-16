@@ -18,11 +18,15 @@ module Data.Incrementalized.Seq.Core
    (
      Seq (..), Delta (..), AtomicDelta(..), fromList,
 
-     singletonF, emptyF, concatF,
+     singletonF, emptyF, appendF, concatF, nullF,
 
      -- * Component functions
-     singletonTr, concatInit, concatTrAtomic, MapCache(..),
+     singletonTr, nullInit, nullTrAtomic,
+     appendInit, appendTrAtomic, AppendCache,
+     concatInit, concatTrAtomic, MapCache(..),
      mapC, mapInit, mapTr, mapTrChanged, mapTrUnchangedAtomic,
+
+     filterC, filterInit, filterTr, filterTrChanged, filterTrUnchangedAtomic,
    ) where
 
 import qualified Data.Foldable
@@ -32,8 +36,10 @@ import qualified Text.Show                     as TS
 
 import qualified Control.Monad
 import           Data.Delta
+import           Data.Foldable                 (foldl')
 import           Data.IFq
 import           Data.Incrementalized
+import           Data.Incrementalized.Bool
 import           Data.Incrementalized.Function
 import           Data.JoinList                 hiding (fromList)
 import           Data.Typeable                 (Typeable)
@@ -142,6 +148,58 @@ emptyC =
 emptyF :: (App IFqS e, Diff a, Typeable a) => e (Seq a)
 emptyF = Unemb.lift emptyC Unemb.unit
 
+type AppendCache = (Int, Int)
+
+appendInit :: (Seq a, Seq a) -> (Seq a, AppendCache)
+appendInit (Seq a1 , Seq a2) =
+  (Seq $ a1 Seq.>< a2, (Seq.length a1, Seq.length a2))
+
+appendTrAtomic ::
+  Diff a =>
+  AtomicDelta (Seq a, Seq a)
+  -> AppendCache
+  -> (Delta (Seq a), AppendCache)
+appendTrAtomic dab (l1, l2) = case dab of
+  ADFst (SIns i as) ->
+    let i' = min i l1
+    in (injDelta $ SIns i' as, (l1 + Seq.length (unSeq as), l2))
+  ADFst (SDel i n) ->
+    let i' = min i l1
+        n' = min n (l1 - i')
+    in (injDelta $ SDel i' n', (l1 - n', l2))
+  ADFst (SRep i da) ->
+    if 0 <= i && i < l1 then
+      (srep i da, (l1, l2))
+    else
+      (mempty, (l1, l2))
+  ADFst (SRearr i n j) ->
+    let i' = min i l1
+        n' = min n (l1 - i')
+        j' = min j (l1 - n')
+    in (injDelta $ SRearr i' n' j', (l1, l2))
+  ADSnd (SIns i as) ->
+    let i' = min i l2
+    in (injDelta $ SIns (i' + l1) as, (l1, l2 + Seq.length (unSeq as)))
+  ADSnd (SDel i n) ->
+    let i' = min i l2
+        n' = min n (l2 - i')
+    in (injDelta $ SDel (i' + l1) n', (l1, l2 - n'))
+  ADSnd (SRep i da) ->
+    if 0 <= i && i < l2 then
+      (srep (i + l1) da, (l1, l2))
+    else
+      (mempty, (l1, l2))
+  ADSnd (SRearr i n j) ->
+    let i' = min i l1
+        n' = min n (l1 - i')
+        j' = min j (l1 - n')
+    in (injDelta $ SRearr (l1 + i') n' (l1 + j'), (l1, l2))
+
+appendC :: Diff a => IFqS (Seq a, Seq a) (Seq a)
+appendC = fromFunctionsCode [|| appendInit ||] [|| iterTr appendTrAtomic ||]
+
+appendF :: (Diff a, Typeable a, App IFqS e) => e (Seq a) -> e (Seq a) -> e (Seq a)
+appendF x y = lift appendC (pair x y)
 
 type ConcatCache = Seq.Seq Int
 
@@ -302,3 +360,183 @@ mapC ::
   => IFqS (PFun IFqS c a b) (PFun IFqS (MapCache a b c) (Seq a) (Seq b))
 mapC = fromStatelessCode (\a -> [|| mapInit $$a ||]) (\da -> [|| mapTr $$da ||])
 
+
+{-
+How filter should behaves?
+
+If a function itself does not change, situation is rather easy:
+
+   fitler f (a /+ da) = filter f a /+ ???
+
+To compute the indices appropriate, we need to keep track of which elements has been filtered:
+
+   Ins i as |-->
+     let cT = length $ filter id $ take i c
+         bs = map (f &&& id) as
+         as' = map snd $ filter fst bs
+         cs' = map fst $ bs
+     in (Ins cT as', cs')
+
+   ...
+
+We also need to store caches used for functions.
+
+But, things become harder when we allow function changes. We need to
+store the original values for this case because a function becomes
+True for an element must insert the element.
+
+-}
+
+type CommonFilterCache a c = Seq.Seq (a, Bool, c)
+
+data FilterCache a c
+  = FilterCacheOpen   !(a -> (Bool, c)) !(CommonFilterCache a c)
+  | FilterCacheClosed !(CommonFilterCache a c)
+
+-- getBoolCache :: FilterCache a c -> Seq.Seq (Bool, c)
+-- getBoolCache (FilterCacheOpen _ _ cs) = cs
+-- getBoolCache (FilterCacheClosed _ cs) = cs
+
+-- setBoolCache :: FilterCache a c -> Seq.Seq (Bool,c) -> FilterCache a c
+-- setBoolCache (FilterCacheOpen f orig _) cs      = FilterCacheOpen f orig cs
+-- setBoolCache (FilterCacheClosed orig _)      cs = FilterCacheClosed orig cs
+
+-- modifyBoolCache u cc = setBoolCache cc (u $ getBoolCache cc)
+
+-- getOrigSeq :: FilterCache a c -> Seq.Seq a
+-- getOrigSeq (FilterCacheOpen _ orig _) = orig
+-- getOrigSeq (FilterCacheClosed orig _) = orig
+
+-- modifyOrigSeq :: (Seq.Seq a -> Seq.Seq a) -> FilterCache a c -> FilterCache a c
+-- modifyOrigSeq u (FilterCacheOpen f orig cs) = FilterCacheOpen f (u orig) cs
+-- modifyOrigSeq _ (FilterCacheClosed orig cs) = FilterCacheClosed (u orig) cs
+
+fst3 :: (a, b, c) -> a
+fst3 (a, _, _) = a
+snd3 :: (a, b, c) -> b
+snd3 (_, b, _) = b
+
+
+
+filterTrUnchangedAtomic ::
+  (Diff a)
+  => (a -> (Bool, c))
+  -> (Delta a -> c -> (Delta Bool, c))
+  -> AtomicDelta (Seq a) -> CommonFilterCache a c -> (Delta (Seq a), CommonFilterCache a c)
+filterTrUnchangedAtomic p deriv_p dseq cc = case dseq of
+  SIns i (Seq as) ->
+    let !i'  = length $ Seq.filter snd3 $ Seq.take i cc
+        !bs  = fmap (\a -> let (b, c) = p a in (a, b, c)) as
+        !as' = fst3 <$> Seq.filter snd3 bs
+        cc' = insSeq i bs cc
+    in (injDelta $! SIns i' (Seq as'), cc')
+  SDel i n ->
+    let (!cs1, cs23) = Seq.splitAt i cc
+        !cs2         = Seq.take n cs23
+        !i' = length $ Seq.filter snd3 cs1
+        !n' = length $ Seq.filter snd3 cs2
+        cc' = delSeq i n cc
+    in (injDelta $! SDel i' n', cc')
+  SRep i da ->
+    case Seq.lookup i cc of
+      Just (ai, bi, ci) ->
+        let !i' = length $ Seq.filter snd3 $ Seq.take i cc
+            (!db, ci') = deriv_p da ci
+            ai' = ai /+ da
+            !cc' = Seq.update i (ai', bi /+ db, ci') cc
+            up  = case (bi, db) of
+                    (True,  DBNot) -> injDelta (SDel i' 1)
+                    (False, DBNot) -> injDelta (SIns i' (Seq $ Seq.singleton ai'))
+                    _              -> mempty
+        in (up, cc')
+      Nothing -> (mempty, cc)
+  SRearr i n j ->
+    let (!cs1, cs23) = Seq.splitAt i cc
+        (!cs2, !cs3) = Seq.splitAt n cs23
+        !i' = length $ Seq.filter snd3 cs1
+        !n' = length $ Seq.filter snd3 cs2
+        !j' = length $ Seq.take j (cs1 Seq.>< cs3)
+        cc' = rearrSeq i n j cc
+    in (injDelta $ SRearr i' n' j', cc')
+
+
+filterTrChanged ::
+  (Diff a)
+  => (c -> (Delta Bool, c))
+  -> CommonFilterCache a c -> (Delta (Seq a), CommonFilterCache a c)
+filterTrChanged df cs =
+  let (ds, cs',_) =
+        foldl' (\(deltas, accCS, i) (a, b, c) ->
+                     let (db, c') = df c
+                         b' = b /+ db
+                         accCS' = accCS Seq.|> (a, b', c')
+                     in case (b, db) of
+                          (True,  DBNot) -> (deltas <> injDelta (SDel i 1), accCS', i)
+                          (False, DBNot) -> (deltas <> injDelta (SIns i (Seq $ Seq.singleton a)), accCS', i + 1)
+                          (True,  DBKeep) -> (deltas, accCS', i + 1)
+                          (False, DBKeep) -> (deltas, accCS', i)) (mempty, Seq.empty, 0) cs
+  in (ds, cs')
+
+filterInit ::
+  (Diff a) =>
+  PFun IFqS c a Bool -> PFun IFqS (FilterCache a c) (Seq a) (Seq a)
+filterInit (PFunIFqS (FunCache isClosed f deriv_f)) =
+  PFunIFqS (FunCache isClosed h deriv_h)
+  where
+    h (Seq as) =
+      let (!bs, !cs) = Seq.unzip $ fmap (\a -> let (b, c) = f a in ((b, a), (a, b, c)))  as
+      in (Seq $ snd <$> Seq.filter fst bs,
+           case isClosed of { Closed -> FilterCacheClosed cs; Open ->  FilterCacheOpen f cs})
+    deriv_h das (FilterCacheClosed cs) =
+      let (!db, !cs') = iterTr (filterTrUnchangedAtomic f deriv_f) das cs
+      in (db, FilterCacheClosed cs')
+    deriv_h das (FilterCacheOpen ff cs) =
+      let (!db, !cs') = iterTr (filterTrUnchangedAtomic ff deriv_f) das cs
+      in (db, FilterCacheOpen ff cs')
+
+
+filterTr ::
+  (Diff a)
+  => Delta (PFun IFqS c a Bool)
+  -> Delta (PFun IFqS (FilterCache a c) (Seq a) (Seq a))
+filterTr (DeltaPFunIFqS (DeltaFunCache True _)) = mempty
+filterTr (DeltaPFunIFqS (DeltaFunCache _ df)) = DeltaPFunIFqS (DeltaFunCache False dh)
+  where
+    dh (FilterCacheClosed cs) = (mempty, FilterCacheClosed cs)
+    dh (FilterCacheOpen f cs) =
+      let (!db, !cs') = filterTrChanged df cs
+      in (db, FilterCacheOpen (changeFunction f df) cs')
+
+
+filterC ::
+  (Diff a)
+  => IFqS (PFun IFqS c a Bool) (PFun IFqS (FilterCache a c) (Seq a) (Seq a))
+filterC = fromStatelessCode (\a -> [|| filterInit $$a ||]) (\da -> [|| filterTr $$da ||])
+
+nullInit :: Seq a -> (Bool, Int)
+nullInit (Seq a) = (Seq.null a, Seq.length a)
+
+nullTrAtomic ::
+  AtomicDelta (Seq a)
+  -> Int
+  -> (Delta Bool, Int)
+nullTrAtomic da len = case da of
+  SIns _ (Seq as) ->
+    let !b = Seq.null as
+        !b0 = len == 0
+        !b' = b0 || b
+    in (b' /- b0, len + Seq.length as)
+  SDel i n ->
+    let !i' = min i len
+        !n' = min n (len - i')
+        !b0 = len == 0
+        !b' = len - n' == 0
+    in (b' /- b0, len - n')
+  SRep _ _ -> (mempty, len)
+  SRearr _ _ _ -> (mempty, len)
+
+nullC :: Diff a => IFqS (Seq a) Bool
+nullC = fromFunctionsCode [|| nullInit ||] [|| iterTr nullTrAtomic ||]
+
+nullF :: (Diff a, Typeable a, App IFqS e) => e (Seq a) -> e Bool
+nullF = lift nullC
