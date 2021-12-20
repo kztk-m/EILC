@@ -38,7 +38,9 @@ module Language.Unembedding (
 
   run, runMono, runWith, runMonoWith,
 
-  share, lam, app
+  share, lam, app, 
+
+  unpair, 
   ) where
 
 import           Data.Env
@@ -247,6 +249,15 @@ share ::
   (LetTerm cat term, App2 cat term e, K cat a, K cat b)
   => e a -> (e a -> e b) -> e b
 share = liftSO2 (Proxy @'[ '[], '[a] ] ) letTerm
+
+unpair :: 
+  forall cat term e a b r. 
+  (Cartesian cat, LetTerm cat term, App2 cat term e, K cat a, K cat b, K cat (Prod cat a b), K cat r) 
+  => e (Prod cat a b) -> (e a -> e b -> e r) -> e r 
+unpair e f = 
+  share (lift (fstS (Proxy @a) (Proxy @b)) e) $ \a -> 
+    share (lift (sndS (Proxy @a) (Proxy @b)) e) $ \b -> 
+      f a b 
 
 lam ::
   forall cat term e a b.
