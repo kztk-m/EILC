@@ -5,9 +5,13 @@ module Data.Interaction
 
     iterations, toStep, repeatSteps
   ) where
+import           Control.DeepSeq (NFData (..))
 
 -- | @'Interaction' a b@ represents a process that repeatedly receives @a@ and returns @b@.
 newtype Interaction a b = Interaction { runInteraction :: a -> (b, Interaction a b) }
+instance NFData (Interaction a b) where
+  rnf (Interaction f) = rnf f
+
 
 iterations :: Interaction a b -> [a] -> [b]
 iterations _ []       = []

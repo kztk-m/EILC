@@ -10,8 +10,6 @@ import           Examples.Filter
 import qualified Data.Incrementalized.Seq as IS
 import           Data.Interaction
 
-instance NFData (Interaction a b) where
-  rnf (Interaction f) = rnf f
 
 inc_q1 :: Tree -> (IS.Seq Tree, Interaction (Delta Tree) (Delta (IS.Seq Tree)))
 inc_q1 = $$( qq1 )
