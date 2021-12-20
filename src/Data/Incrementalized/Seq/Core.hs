@@ -461,6 +461,7 @@ filterTrUnchangedAtomic p deriv_p dseq cc = case dseq of
             !cc' = Seq.update i (ai', bi /+ db, ci') cc
             up  = case (bi, db) of
                     (True,  DBNot) -> injDelta (SDel i' 1)
+                    (True,  DBKeep) -> injDelta (SRep i' da)
                     (False, DBNot) -> injDelta (SIns i' (Seq $ Seq.singleton ai'))
                     _              -> mempty
         in (up, cc')
