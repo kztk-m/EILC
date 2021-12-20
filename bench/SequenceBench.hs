@@ -37,34 +37,6 @@ sequence1 = IS.fromList [1..100]
 sequence2 :: Seq Int
 sequence2 = IS.fromList [1..100]
 
-instance NFData a => NFData (Seq a) where
-  rnf (Seq a) = rnf a
-
-instance NFData a => NFData (JoinList a) where
-  rnf JLNil          = ()
-  rnf (JLNonEmpty a) = rnf a
-
-instance NFData a => NFData (JoinListNE a) where
-  rnf (JLSingle a)   = rnf a
-  rnf (JLJoin xs ys) = rnf (xs, ys)
-
-instance (NFData a, NFData (Delta a)) => NFData (AtomicDelta (Seq a)) where
-  rnf (SIns _ s)     = rnf s
-  rnf (SDel _ _)     = ()
-  rnf (SRep _ da)    = rnf da
-  rnf (SRearr _ _ _) = ()
-
-instance (NFData a, NFData (Delta a)) => NFData (Delta (Seq a)) where
-  rnf (DeltaSeq a) = rnf a
-
-instance (NFData (Delta a), NFData (Delta b)) => NFData (Delta (a, b)) where
-  rnf (PairDelta da db) = rnf (da, db)
-
-instance NFData (Delta Int) where
-  rnf (DeltaInt x) = rnf x
-
-instance NFData a => NFData (GroupChange a) where
-  rnf (GroupChange a) = rnf a
 
 mkInitSequence :: Int -> Seq Int
 mkInitSequence n = IS.fromList $ take n [1..]

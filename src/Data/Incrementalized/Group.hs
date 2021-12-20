@@ -22,13 +22,15 @@ module Data.Incrementalized.Group
      DiffGroupChange(..), DiffGroupChangeReplace(..)
    ) where
 
-import           Data.Coerce (coerce)
+import           Control.DeepSeq (NFData (rnf))
+import           Data.Coerce     (coerce)
 import           Data.Delta
 import           Data.Group
 
 newtype GroupChange a = GroupChange { getGroupChange :: a }
   deriving stock   (Show)
   deriving newtype (Semigroup, Monoid, Group, Eq, Ord, Enum, Num)
+  deriving newtype NFData
 
 applyGroupChange :: Semigroup a => a -> GroupChange a -> a
 applyGroupChange a (GroupChange a') = a <> a'
@@ -37,6 +39,10 @@ applyGroupChange a (GroupChange a') = a <> a'
 --   Notice that this itself does not form a group, as there is no inverse element for 'Replace a'.
 data GroupChangeWithReplace a = InjGroupChange !(GroupChange a) | Replace !a
   deriving stock (Show, Eq, Ord)
+
+instance NFData a => NFData (GroupChangeWithReplace a) where
+  rnf (InjGroupChange c) = rnf c
+  rnf (Replace a)        = rnf a
 
 instance Semigroup a => Semigroup (GroupChangeWithReplace a) where
   Replace a <> InjGroupChange b        = Replace (a <> getGroupChange b)
@@ -54,10 +60,12 @@ applyGroupChangeReplace a (InjGroupChange da) = applyGroupChange a da
 newtype WithGroupChange a = WithGroupChange { detachGroupChange :: a }
   deriving newtype (Semigroup, Monoid, Group, Eq, Ord, Enum, Num, Bounded)
   deriving stock (Show, Functor, Foldable, Traversable)
+  deriving newtype NFData
 
 newtype instance Delta (WithGroupChange a) = DWithGroupChange (GroupChange a)
   deriving newtype (Semigroup, Monoid)
   deriving stock Show
+  deriving newtype NFData
 
 instance (Monoid a, Eq a) => Diff (WithGroupChange a) where
   WithGroupChange a /+ DWithGroupChange da = WithGroupChange $ applyGroupChange a da
@@ -69,10 +77,12 @@ instance (Group a, Eq a) => DiffMinus (WithGroupChange a) where
 newtype WithGroupChangeReplace a = WithGroupChangeReplace { detachGroupChangeReplace :: a }
   deriving newtype (Semigroup, Monoid, Group, Eq, Ord, Enum, Bounded)
   deriving stock (Show, Functor, Foldable, Traversable)
+  deriving newtype NFData
 
 newtype instance Delta (WithGroupChangeReplace a) = DWithGroupChangeReplace (GroupChangeWithReplace a)
   deriving newtype (Semigroup, Monoid)
   deriving stock (Show)
+  deriving newtype NFData
 
 instance (Monoid a, Eq a) => Diff (WithGroupChangeReplace a) where
   WithGroupChangeReplace a /+ DWithGroupChangeReplace da = WithGroupChangeReplace $ applyGroupChangeReplace a da

@@ -10,14 +10,25 @@ module Data.JoinList
   )
   where
 
+import           Control.DeepSeq (NFData (..))
+
 import qualified Data.Foldable
-import           Data.Function (on)
-import qualified Text.Show     as TS
+import           Data.Function   (on)
+import qualified Text.Show       as TS
 
 data JoinListNE a = JLSingle a | JLJoin !(JoinListNE a) !(JoinListNE a)
   deriving stock (Functor, Foldable, Traversable)
 data JoinList a = JLNil | JLNonEmpty !(JoinListNE a)
   deriving stock (Functor, Foldable, Traversable)
+
+
+instance NFData a => NFData (JoinList a) where
+  rnf JLNil          = ()
+  rnf (JLNonEmpty a) = rnf a
+
+instance NFData a => NFData (JoinListNE a) where
+  rnf (JLSingle a)   = rnf a
+  rnf (JLJoin xs ys) = rnf (xs, ys)
 
 instance Eq a => Eq (JoinList a) where
   (==) = (==) `on` Data.Foldable.toList

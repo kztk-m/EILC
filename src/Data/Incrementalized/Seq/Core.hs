@@ -34,6 +34,7 @@ import qualified Data.Sequence                 as Seq
 import           Prelude                       hiding (id, (.))
 import qualified Text.Show                     as TS
 
+import           Control.DeepSeq               (NFData, rnf)
 import qualified Control.Monad
 import           Data.Delta
 import           Data.Foldable                 (foldl')
@@ -65,6 +66,20 @@ newtype instance Delta (Seq a)
 
 deriving stock instance (Show a, Show (Delta a)) => Show (Delta (Seq a))
 deriving stock instance (Eq a, Eq (Delta a)) => Eq (Delta (Seq a))
+
+
+instance NFData a => NFData (Seq a) where
+  rnf (Seq a) = rnf a
+
+
+instance (NFData a, NFData (Delta a)) => NFData (AtomicDelta (Seq a)) where
+  rnf (SIns _ s)     = rnf s
+  rnf (SDel _ _)     = ()
+  rnf (SRep _ da)    = rnf da
+  rnf (SRearr _ _ _) = ()
+
+instance (NFData a, NFData (Delta a)) => NFData (Delta (Seq a)) where
+  rnf (DeltaSeq a) = rnf a
 
 instance Diff a => Diff (Seq a) where
   (/+) = applyDeltaFromHasAtomicDelta

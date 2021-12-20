@@ -31,6 +31,7 @@ where
 import           Data.Group                 ()
 import           Data.Monoid                (Sum (..))
 
+import           Control.DeepSeq            (NFData)
 import           Data.Delta
 import           Data.IFq
 import           Data.Incrementalized       (fromFunctionsCode,
@@ -43,7 +44,7 @@ import           Language.Unembedding
 newtype instance Delta Integer = DeltaInteger (Sum Integer)
   deriving newtype (Semigroup, Monoid, Num)
   deriving stock Show
-  deriving newtype Eq
+  deriving newtype (Eq, NFData)
 
 deriving via WithGroupChange (Sum Integer) instance Diff Integer
 deriving via WithGroupChange (Sum Integer) instance DiffMinus Integer
@@ -174,7 +175,7 @@ instance HasNum IFqS Integer where
 newtype instance Delta Int = DeltaInt (GroupChange (Sum Int))
   deriving newtype (Semigroup, Monoid, Num)
   deriving stock Show
-  deriving newtype Eq
+  deriving newtype (Eq, NFData)
 
 deriving via WithGroupChange (Sum Int) instance Diff Int
 deriving via WithGroupChange (Sum Int) instance DiffMinus Int
@@ -216,6 +217,8 @@ instance HasNum IFqS Int where
 
 
 newtype instance Delta (Sum n) = DeltaSum { getDeltaSum :: Delta n }
+
+deriving newtype instance NFData (Delta n) => NFData (Delta (Sum n))
 
 deriving newtype instance Num (Delta n) => Num (Delta (Sum n))
 
@@ -265,7 +268,7 @@ instance HasNum IFqS (Sum Int) where
 newtype instance Delta Double = DeltaDouble (GroupChange (Sum Double))
   deriving newtype (Semigroup, Monoid, Num)
   deriving stock Show
-  deriving newtype Eq
+  deriving newtype (Eq, NFData)
 
 deriving via WithGroupChange (Sum Double) instance Diff Double
 deriving via WithGroupChange (Sum Double) instance DiffMinus Double

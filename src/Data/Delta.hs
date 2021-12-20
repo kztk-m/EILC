@@ -48,6 +48,7 @@ module Data.Delta (
 -- Then, m must be Applicative as
 --
 -- f <*> x = monoidMap f $ \f' -> monoidMap x $ \x' -> injMonoid (f' a')
+import           Control.DeepSeq       (NFData (..))
 import           Data.Coerce           (Coercible, coerce)
 import           Data.Functor.Identity
 import           Data.Kind             (Type)
@@ -147,9 +148,14 @@ iterTr f = unStateWriterLL . monoidMap (StateWriterLL . f)
 
 newtype instance Delta ()     = DeltaUnit ()
   deriving stock (Show, Eq)
+  deriving newtype NFData 
 
 data instance Delta (a, b) = PairDelta (Delta a) (Delta b)
 deriving stock instance (Show (Delta a), Show (Delta b)) => Show (Delta (a, b))
+
+
+instance (NFData (Delta a), NFData (Delta b)) => NFData (Delta (a, b)) where
+  rnf (PairDelta da db) = rnf (da, db)
 
 instance Semigroup (Delta ()) where
   _ <> _ = coerce ()
