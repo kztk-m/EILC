@@ -1,16 +1,24 @@
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE FlexibleInstances  #-}
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE TemplateHaskell    #-}
-{-# LANGUAGE TypeFamilies       #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeFamilies               #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE FlexibleContexts   #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 module Examples.Filter where
+
+import           Control.DeepSeq
 
 import           Data.Coerce                         (coerce)
 import qualified Data.List
 import qualified Data.Sequence                       as S
 import           Data.String
+import           Prelude                             hiding (id, (.))
+import qualified Prelude
+import qualified Text.Show                           as TS
 
 import           Data.Delta
 import           Data.JoinList
@@ -23,7 +31,12 @@ import qualified Data.Incrementalized.Fixed          as I
 import qualified Data.Incrementalized.Seq            as IS
 import           Data.Typeable
 
+import           Data.Code                           (Code)
 import           Data.Foldable                       (toList)
+import           Data.IFqTU                          (IFqTU)
+import           Data.Incrementalized.Either         (Delta (DEitherInPlace),
+                                                      SumTerm, eitherF)
+import           Data.Interaction                    (Interaction (..))
 import           Language.Unembedding
 import           Language.Unembedding.PseudoFunction
 
@@ -42,9 +55,22 @@ Let us consider a following version of labeled rose-trees.
 data Tree = Elem !(I.Fixed String) !(IS.Seq Tree)
           | Attr !(I.Fixed String) !MyString
           | Text !MyString
-  deriving stock (Show , Eq)
+  deriving stock Eq
 -- data Attr = Attr !(I.Fixed String) !MyString
 --  deriving stock (Show , Eq)
+
+instance NFData Tree where
+  rnf (Elem _ ts) = rnf (IS.unSeq ts)
+  rnf (Attr _ v)  = rnf (IS.unSeq v)
+  rnf (Text v)    = rnf (IS.unSeq v)
+
+instance Show Tree where
+  showsPrec k (Elem s ts) = TS.showParen (k > 9) $
+    TS.showString "Elem" . TS.showChar ' ' . shows (I.getFixed s) . TS.showChar ' ' . TS.showString "(" . TS.showString "fromList" . TS.showChar ' ' . TS.showListWith shows (toList ts) . TS.showString ")"
+  showsPrec k (Attr s v) = TS.showParen (k > 9) $
+    TS.showString "Attr" . TS.showChar ' ' . shows (I.getFixed s) . TS.showChar ' ' . TS.shows (map unMyChar $ toList v)
+  showsPrec k (Text s)   = TS.showParen (k > 9) $
+    TS.showString "Text" . TS.showChar ' ' . TS.shows (map unMyChar $ toList s)
 
 {-
 Intuitively, a fragment `<p class="c">Hey <em>You</em></p>` is represented as:
@@ -63,7 +89,18 @@ instance IsString (IS.Seq MyChar) where
 newtype MyChar = MyChar Char
   deriving stock (Show, Eq)
 
+instance NFData MyChar where
+  rnf (MyChar c) = rnf c
+
+unMyChar :: MyChar -> Char
+unMyChar (MyChar c) = c
+
 data instance Delta MyChar = DReplaceChar !MyChar | DKeepChar
+  deriving stock Show
+
+instance NFData (Delta MyChar) where
+  rnf (DReplaceChar _) = ()
+  rnf DKeepChar        = ()
 
 instance Semigroup (Delta MyChar) where
   _ <> a = a
@@ -86,7 +123,8 @@ would be better than addition constructors. So, we may prepare:
 
 
 newtype instance Delta Tree = DTree (JoinList (AtomicDelta Tree))
-
+  deriving stock Show
+  deriving newtype NFData
 instance Semigroup (Delta Tree) where
   (<>) = coerce ((<>) :: JoinList (AtomicDelta Tree) -> JoinList (AtomicDelta Tree) -> JoinList (AtomicDelta Tree))
 
@@ -132,6 +170,7 @@ instance HasAtomicDelta Tree where
     | DModText (Delta MyString) -- modifies a string
     --  | DElem    String     -- enclose it by an element
     --  | DPick    Int          -- promote a child as a root
+    deriving stock Show
 
   injDelta = DTree Prelude.. pure
   monoidMap f (DTree as) = foldMap f as
@@ -172,6 +211,12 @@ instance HasAtomicDelta Tree where
   --           IS.unSeq ts `S.index` i
   --     _ ->
   --       t0
+
+instance NFData (AtomicDelta Tree) where
+  rnf (DModChildren dt) = rnf dt
+  rnf (DModTag s)       = rnf s
+  rnf (DModAttr s v)    = rnf (s, v)
+  rnf (DModText s)      = rnf s
 
 children :: Filter
 children (Elem _ ts) = ts
@@ -242,6 +287,24 @@ isElemF = lift isElemC
     isElemC :: IFqS Tree Bool
     isElemC = fromStatelessCode (\t -> [|| isElem $$t ||]) (const [|| mempty ||])
 
+{-
+[Note]
+
+An observation is that it is often less meaningful to have an incrementalized
+version of a predicate. For a predicate `p :: a -> Bool`, often the best we can
+is to recompute `p` for `a /+ da` and produce a delta by `p (a /+ da) - p a`,
+which is very default for all functions. Thus, we want to have such trivial
+lifting typically for predicate-like functions.
+
+(2021-12-17) Now, they are provided as 'trivialIncrementalization***" in
+Data.Incrementalized.
+
+We could do some optimization for our case, leveraging the fact that the
+function that updates on `Tree` cannot change the top-level constructor. So, we
+only store the cache when the input has a relevant form to a predicate.
+
+-}
+
 textOfInit :: String -> Tree -> (Bool, Maybe MyString)
 textOfInit s (Text (IS.Seq ss)) = (coerce (toList ss) == s, Just (IS.Seq ss))
 textOfInit _ _                  = (False, Nothing)
@@ -302,7 +365,7 @@ hasAttrValTrA sk sv (DModAttr k dv) (Just (k0, v0)) =
          (sv == coerce (toList v0))
     b  = (sk == k) &&
          (sv == coerce (toList v))
-
+hasAttrValTrA _ _ _ c = (mempty, c)
 
 hasAttrOfF :: App IFqS e => String -> e Tree -> e Bool
 hasAttrOfF s = lift (fromFunctionsCode [|| hasAttrOfInit s ||] [|| iterTr (hasAttrOfTr s) ||])
@@ -368,21 +431,141 @@ f /> g = f >>> childrenF >>> g
 withF :: (App2 IFqS t e, PFunTerm IFqS t) => EFilter e -> EFilter e -> EFilter e
 f `withF` g = IS.filterF (I.notF Prelude.. IS.nullF Prelude.. g) Prelude.. f
 
+liftPredicate :: (App IFqS e, Diff a, Typeable a) => Code (a -> Bool) -> e a -> e Bool
+liftPredicate p = lift (trivialIncrementalizationCode p)
 
-q1 :: (App2 IFqS t e, PFunTerm IFqS t) => EFilter e
-q1 = mkElemF "bib" [ keepF /> (tagF "book" `withF` byAW  >>> h) ]
+q1Filter :: forall t e. (App2 IFqS t e, SumTerm IFqS t DiffMinus, I.IfTerm IFqS t DiffMinus, PFunTerm IFqS t) => EFilter e
+q1Filter = mkElemF "bib" [ keepF /> ((tagF "book" `withF` byAW ) >>> h ) ]
   where
+    byAW :: EFilter e
     byAW =
-      keepF /> tagF "publisher" /> textOfF "Addision-Wesley"
+      keepF /> tagF "publisher" /> textOfF "Addison-Wesley"
 
+    h :: EFilter e
     h = mkElemF "book"
         [ keepF /> attrF "year",
           keepF /> tagF "title" ]
         `withF`
-        keepF /> attrvalF "year" "1991"
+        (keepF /> ifAttrF "year" (\s a -> I.if_ (liftPredicate [|| \(IS.Seq str) -> (read (map unMyChar $ Data.Foldable.toList str) :: Int) > 1991 ||] s) (IS.singletonF a) IS.emptyF) noneF)
         -- `withF`
         -- keepF /> tagF "publisher" /> ifTxtF _ noneF
         -- `withF`
         -- keepF /> ifFindF "year" _
 
+elm :: I.Fixed String -> [Tree] -> Tree
+elm s ts = Elem s $ IS.fromList ts
 
+exampleInput :: Tree
+exampleInput =
+  elm "bib" [
+    elm "book" [
+      Attr "year" "1994",
+      elm "title" [ Text "TCP/IP Illustrated" ],
+      elm "author" [ elm "last" [ Text "Stevens" ], elm "first" [ Text "W." ] ],
+      elm "publisher" [ Text "Addison-Wesley" ],
+      elm "price" [ Text "65.95" ] ],
+    elm "book" [
+      Attr "year" "1992",
+      elm "title" [ Text "Advanced Programming in the Unix environment" ],
+      elm "author" [ elm "last" [ Text "Stevens" ], elm "first" [ Text "W." ] ],
+      elm "publisher" [ Text "Addison-Wesley" ],
+      elm "price" [ Text "65.95" ] ],
+    elm "book" [
+      Attr "year" "2000",
+      elm "title" [ Text "Data on the Web" ],
+      elm "author" [ elm "last" [ Text "Abiteboul" ], elm "first" [ Text "Serge" ] ],
+      elm "author" [ elm "last" [ Text "Buneman" ], elm "first" [ Text "Peter" ] ],
+      elm "author" [ elm "last" [ Text "Suciu" ], elm "first" [ Text "Dan" ] ],
+      elm "publisher" [ Text "Morgan Kaufmann Publishers" ],
+      elm "price" [ Text "39.95" ] ],
+    elm "book" [
+      Attr "year" "1999",
+      elm "title" [ Text "The Economics of Technology and Content for Digital TV" ],
+      elm "editor" [ elm "last" [ Text "Gerbarg" ], elm "first" [ Text "Darcy" ], elm "affiliation" [Text "CITI"] ],
+      elm "publisher" [ Text "Kluwer Academic Publishers" ],
+      elm "price" [ Text "129.95" ] ]
+  ]
+
+exampleDelta :: Delta Tree
+exampleDelta =
+  injDelta $ DModChildren $ injDelta $ IS.SRep 0 $
+  injDelta $ DModChildren $ injDelta $ IS.SRep 1 $
+  injDelta $ DModChildren $ injDelta $ IS.SRep 0 $
+  injDelta $ DModText $ injDelta $ IS.SIns (length ("TCP/IP Illustrated" :: String)) " (Second Edition)"
+
+qq1 :: Code (Tree -> (IS.Seq Tree, Interaction (Delta Tree) (Delta (IS.Seq Tree))))
+qq1 = compileCode $ runMonoWith (Proxy :: Proxy IFqTU) q1Filter
+
+
+-- >>> q1 = $$( qq1 )
+-- >>> let (r, i) = q1 exampleInput
+-- >>> r
+-- >>> exampleInput /+ exampleDelta
+-- >>> fst $ runInteraction i exampleDelta
+-- >>> r /+ (fst $ runInteraction i exampleDelta) == fst (q1 $ exampleInput /+ exampleDelta)
+-- fromList [Elem "bib" (fromList [Elem "book" (fromList [Attr "year" "1994",Elem "title" (fromList [Text "TCP/IP Illustrated"])]),Elem "book" (fromList [Attr "year" "1992",Elem "title" (fromList [Text "Advanced Programming in the Unix environment"])])])]
+-- Elem "bib" (fromList [Elem "book" (fromList [Attr "year" "1994",Elem "title" (fromList [Text "TCP/IP Illustrated (Second Edition)"]),Elem "author" (fromList [Elem "last" (fromList [Text "Stevens"]),Elem "first" (fromList [Text "W."])]),Elem "publisher" (fromList [Text "Addison-Wesley"]),Elem "price" (fromList [Text "65.95"])]),Elem "book" (fromList [Attr "year" "1992",Elem "title" (fromList [Text "Advanced Programming in the Unix environment"]),Elem "author" (fromList [Elem "last" (fromList [Text "Stevens"]),Elem "first" (fromList [Text "W."])]),Elem "publisher" (fromList [Text "Addison-Wesley"]),Elem "price" (fromList [Text "65.95"])]),Elem "book" (fromList [Attr "year" "2000",Elem "title" (fromList [Text "Data on the Web"]),Elem "author" (fromList [Elem "last" (fromList [Text "Abiteboul"]),Elem "first" (fromList [Text "Serge"])]),Elem "author" (fromList [Elem "last" (fromList [Text "Buneman"]),Elem "first" (fromList [Text "Peter"])]),Elem "author" (fromList [Elem "last" (fromList [Text "Suciu"]),Elem "first" (fromList [Text "Dan"])]),Elem "publisher" (fromList [Text "Morgan Kaufmann Publishers"]),Elem "price" (fromList [Text "39.95"])]),Elem "book" (fromList [Attr "year" "1999",Elem "title" (fromList [Text "The Economics of Technology and Content for Digital TV"]),Elem "editor" (fromList [Elem "last" (fromList [Text "Gerbarg"]),Elem "first" (fromList [Text "Darcy"]),Elem "affiliation" (fromList [Text "CITI"])]),Elem "publisher" (fromList [Text "Kluwer Academic Publishers"]),Elem "price" (fromList [Text "129.95"])])])
+-- DeltaSeq (fromList [SRep 0 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 1 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModText (DeltaSeq (fromList [SIns 18 (fromList [MyChar ' ',MyChar '(',MyChar 'S',MyChar 'e',MyChar 'c',MyChar 'o',MyChar 'n',MyChar 'd',MyChar ' ',MyChar 'E',MyChar 'd',MyChar 'i',MyChar 't',MyChar 'i',MyChar 'o',MyChar 'n',MyChar ')'])]))]))]))]))]))]))]))]))])
+-- True
+
+
+{-
+[Note]
+
+HaXML provides two important functions that investigate attributes and texts.
+
+    ifTxt  :: (String -> CFilter i) -> CFilter i -> CFilter i
+    ifFind :: String ->(String -> CFilter i) -> CFilter i -> CFilter i
+
+Intuitively, `ifTxt yes no` runs `yes s` if an input is a text node whose
+content is `s`, and `no` otherwise. Function `ifFind k yes no` has a similar
+behavior but it test an input has an attribute of label `k` and the `yes` filter
+will be applied to its corresponding value.
+
+Of course, we do not want to directly support these function as they share some
+common work. So, we may provide a generic destructor for sum types (`Either`, in
+Haskell).
+
+    eitherF :: ... => e (Either a b) -> (e a -> e r) -> (e b -> e r) -> e r
+
+-}
+
+checkTextInit :: Tree -> (Either (MyString, Tree) Tree, Bool)
+checkTextInit t@(Text s) = (Left (s, t), True)
+checkTextInit t          = (Right t, True)
+
+checkTextTrA :: AtomicDelta Tree -> Bool -> (Delta (Either (MyString, Tree) Tree), Bool)
+checkTextTrA dt@(DModText t) True = (DEitherInPlace (PairDelta t $ injDelta dt) mempty , True)
+checkTextTrA dt              True = (DEitherInPlace (PairDelta mempty $ injDelta dt) mempty, True)
+checkTextTrA dt             False = (DEitherInPlace mempty (injDelta dt), False)
+
+checkTextC :: IFqS Tree (Either (MyString, Tree) Tree)
+checkTextC = fromFunctionsCode [|| checkTextInit ||] [|| iterTr checkTextTrA ||]
+
+ifTxtF :: (App2 IFqS t e, SumTerm IFqS t DiffMinus) => (e MyString -> EFilter e) -> EFilter e -> EFilter e
+ifTxtF f g e = eitherF (lift checkTextC e) (\x -> f (fstF x) (sndF x)) g
+
+checkAttrInit :: String -> Tree -> (Either (MyString , Tree) Tree, Bool)
+checkAttrInit s t@(Attr k v) | s == I.getFixed k = (Left (v, t), True)
+checkAttrInit _ t                                = (Right t, False)
+
+checkAttrTrA :: String -> AtomicDelta Tree -> Bool -> (Delta (Either (MyString, Tree) Tree), Bool)
+checkAttrTrA s dt@(DModAttr k dv) True | s == k = (DEitherInPlace (PairDelta dv (injDelta dt)) mempty, True)
+checkAttrTrA _ dt True = (DEitherInPlace (PairDelta mempty (injDelta dt)) mempty, True)
+checkAttrTrA _ dt False = (DEitherInPlace mempty (injDelta dt), False)
+
+checkAttrC :: String -> IFqS Tree (Either (MyString, Tree) Tree)
+checkAttrC s = fromFunctionsCode [|| checkAttrInit s ||] [|| iterTr (checkAttrTrA s) ||]
+
+ifAttrF :: (App2 IFqS t e, SumTerm IFqS t DiffMinus) => String -> (e MyString -> EFilter e) -> EFilter e -> EFilter e
+ifAttrF s f g e = eitherF (lift (checkAttrC s) e) (\x -> f (fstF x) (sndF x)) g
+
+pickFunc :: IS.Seq a -> a
+pickFunc (IS.Seq (a S.:<| _)) = a
+pickFunc _                    = error "pickInit: empty sequence"
+
+pickC :: (Typeable a, DiffMinus a) => IFqS (IS.Seq a) a
+pickC = trivialIncrementalizationCode [|| pickFunc ||]
+
+pickF :: (Typeable a, DiffMinus a, App IFqS e) => e (IS.Seq a) -> e a
+pickF = lift pickC
