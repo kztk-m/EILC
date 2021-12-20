@@ -10,11 +10,11 @@ module Data.Incrementalized
   (
     IncrementalizedQ(..),
 
-    fromStatelessCode, fromFunctionsCode, compileCode,
-    fromStatelessIdentity, fromFunctionsIdentity, compileIdentity
+    fromStatelessCode, fromFunctionsCode, compileCode, trivialIncrementalizationCode,
+    fromStatelessIdentity, fromFunctionsIdentity, compileIdentity, trivialIncrementalizationIdentity,
   ) where
 
-import           Data.Delta            (Delta)
+import           Data.Delta            (Delta, Diff (..), DiffMinus (..))
 import           Data.Interaction      (Interaction)
 import           Data.Kind             (Type)
 import           Data.Typeable         (Typeable)
@@ -43,6 +43,35 @@ class IncrementalizedQ cat where
   compile ::
     cat a b -> CodeType cat (a -> (b, Interaction (Delta a) (Delta b) ))
 
+
+trivialInit :: (a -> b) -> a -> (b, (a, b))
+trivialInit f a = seq b (b, (a, b))
+  where
+    b = f a
+trivialTr ::
+  (Diff a, DiffMinus b) =>
+  (a -> b)
+  -> Delta a
+  -> (a, b)
+  -> (Delta b, (a, b))
+trivialTr f da (a, b) = (b' /- b, (a', b'))
+  where
+    a' = a /+ da
+    b' = f a'
+
+trivialIncrementalizationCode ::
+  (IncrementalizedQ cat, CodeType cat ~ PackedCode, Typeable a, Typeable b, Diff a, DiffMinus b)
+  => Code (a -> b)
+  -> cat a b
+trivialIncrementalizationCode cf =
+  fromFunctionsCode [|| trivialInit $$cf ||] [|| trivialTr $$cf ||]
+
+trivialIncrementalizationIdentity ::
+  (IncrementalizedQ cat, CodeType cat ~ Identity, Typeable a, Typeable b, Diff a, DiffMinus b)
+  => (a -> b)
+  -> cat a b
+trivialIncrementalizationIdentity f =
+  fromFunctionsIdentity (trivialInit f) (trivialTr f)
 
 fromStatelessCode ::
   forall cat a b.
