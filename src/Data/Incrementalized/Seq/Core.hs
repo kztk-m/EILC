@@ -109,6 +109,12 @@ instance Diff a => HasAtomicDelta (Seq a) where
 deriving stock instance (Show a, Show (Delta a)) => Show (AtomicDelta (Seq a))
 deriving stock instance (Eq a, Eq (Delta a)) => Eq (AtomicDelta (Seq a))
 
+instance Diff a => DiffReplace (Seq a) where
+  replaceTo b = injDelta (SDel 0 maxBound) <> injDelta (SIns 0 b)
+
+instance Diff a => DiffMinus (Seq a) where
+  -- | @b /- a@ produce a change that removes a completely and then inserts b.
+  Seq b /- Seq a = injDelta (SDel 0 (Seq.length a)) <> injDelta (SIns 0 $ Seq b)
 
 -- smart? constructor
 srep :: Diff a => Int -> Delta a -> Delta (Seq a)
