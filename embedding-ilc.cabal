@@ -70,6 +70,7 @@ library
         Data.Incrementalized.Function 
         Data.Incrementalized.Bool
         Data.Incrementalized.Group
+        Data.Incrementalized.Either 
         Data.Incrementalized.Bag 
         Data.JoinList 
         Data.IF
