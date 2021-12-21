@@ -1,9 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
-import           Control.DeepSeq
 import           Criterion.Main
 
 
-import           Data.Code                (Code)
 import           Data.Delta
 import           Examples.Filter
 

@@ -8,12 +8,12 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 module Examples.Filter where
 
 import           Control.DeepSeq
 
 import           Data.Coerce                         (coerce)
-import qualified Data.List
 import qualified Data.Sequence                       as S
 import           Data.String
 import           Prelude                             hiding (id, (.))
@@ -135,27 +135,6 @@ instance Diff Tree where
   (/+) = applyDeltaFromHasAtomicDelta
   checkEmpty = checkEmptyFromAtomicDelta
 
--- insAt :: Int -> a -> [a] -> [a]
--- insAt 0  b as       = b : as
--- insAt _n b []       = [b] -- _n > 0
--- insAt n  b (a : as) = a : insAt (n - 1) b as
-
--- deleteAt :: Int -> [a] -> [a]
--- deleteAt 0 (_ : as) = as
--- deleteAt n (a : as) = a : deleteAt (n-1) as
--- deleteAt _ []       = error "deleteAt: empty list"
-
--- lookupAttr :: String -> [Attr] -> Maybe MyString
--- lookupAttr _ [] = Nothing
--- lookupAttr k (Attr k' v' : as)
---   | k == I.getFixed k'   = Just v'
---   | otherwise = lookupAttr k as
-
--- modifyAttr :: String -> [Attr] -> (MyString -> MyString) -> [Attr]
--- modifyAttr _k [] _u = []
--- modifyAttr k (Attr k' v' : as) u
---   | k == I.getFixed k'   = Attr k' (u v') : as
---   | otherwise = Attr k' v' : modifyAttr k as u
 
 instance HasAtomicDelta Tree where
   -- This change structure is not complete in the sense that
@@ -164,12 +143,8 @@ instance HasAtomicDelta Tree where
   data instance AtomicDelta Tree
     = DModChildren (Delta (IS.Seq Tree))
     | DModTag  String
-    --  | DInsAttr Attr         -- insert an attribute
-    --  | DDelAttr String       -- delete an attribute by its name
     | DModAttr String (Delta MyString) -- change the attribute's value
     | DModText (Delta MyString) -- modifies a string
-    --  | DElem    String     -- enclose it by an element
-    --  | DPick    Int          -- promote a child as a root
     deriving stock Show
 
   injDelta = DTree Prelude.. pure

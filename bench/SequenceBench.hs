@@ -10,26 +10,22 @@
 import           Examples.Sequence
 
 import           Control.DeepSeq
-import           Control.Monad                (join)
 import           Criterion.Main
-import qualified Data.Sequence                as S
+import qualified Data.Sequence            as S
 
 import           Data.Delta
 import           Data.Interaction
 
-import           Data.List                    (foldl')
+import           Data.List                (foldl')
 
 -- import           Data.IFFT         (IFFT)
-import           Data.IFqT                    (IFqT)
-import           Data.IFqTU                   (IFqTU)
+import           Data.IFqT                (IFqT)
+import           Data.IFqTU               (IFqTU)
 
-import           Data.IF                      (IFT)
-import           Data.Incrementalized.Group
-import           Data.Incrementalized.Numeric
-import           Data.Incrementalized.Seq     as IS
-import           Data.Proxy                   (Proxy (..))
+import           Data.IF                  (IFT)
+import           Data.Incrementalized.Seq as IS
+import           Data.Proxy               (Proxy (..))
 
-import           Data.JoinList
 
 sequence1 :: Seq Int
 sequence1 = IS.fromList [1..100]
@@ -83,7 +79,7 @@ tryScratch = go
 
 cartesianS :: (Seq Int, Seq Int) -> Seq (Int, Int)
 cartesianS (xs, ys) =
-  join $ fmap (\x -> fmap (\y -> (x,y)) ys) xs
+  xs >>= \x -> fmap (\y -> (x,y)) ys
 
 dCartesianT, dCartesianTU, dCartesianRaw ::
   (Seq Int, Seq Int) -> (Seq (Int, Int), Interaction (Delta (Seq Int, Seq Int)) (Delta (Seq (Int, Int))))

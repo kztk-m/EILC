@@ -1,26 +1,19 @@
-{-# LANGUAGE ConstraintKinds            #-}
-{-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE DeriveFunctor              #-}
-{-# LANGUAGE DerivingStrategies         #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE FlexibleInstances          #-}
-{-# LANGUAGE FunctionalDependencies     #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE NoMonomorphismRestriction  #-}
-{-# LANGUAGE PolyKinds                  #-}
-{-# LANGUAGE QuantifiedConstraints      #-}
-{-# LANGUAGE RankNTypes                 #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE StandaloneDeriving         #-}
-{-# LANGUAGE TemplateHaskell            #-}
-{-# LANGUAGE TypeApplications           #-}
-{-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE TypeFamilyDependencies     #-}
-{-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE UndecidableInstances       #-}
+{-# LANGUAGE BangPatterns              #-}
+{-# LANGUAGE ConstraintKinds           #-}
+{-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE DerivingStrategies        #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE MultiParamTypeClasses     #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE PolyKinds                 #-}
+{-# LANGUAGE QuantifiedConstraints     #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE TypeApplications          #-}
+{-# LANGUAGE TypeFamilyDependencies    #-}
+{-# LANGUAGE UndecidableInstances      #-}
 {-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
-{-# LANGUAGE BangPatterns               #-}
 
 module Examples.Sequence (
   -- S(..), type AtomicDelta(..),
@@ -33,24 +26,13 @@ module Examples.Sequence (
   ) where
 
 import           Prelude                             hiding ((.))
-import qualified Prelude
 
-import           Control.DeepSeq
-import qualified Control.Monad
-import           Data.Coerce                         (coerce)
 import           Data.Dynamic
-import qualified Data.Foldable                       (foldl', toList)
 import           Data.Incrementalized
-import           Data.Kind                           (Type)
-import           Data.Maybe                          (fromJust)
 import qualified Data.Sequence                       as Seq
 import           Data.Typeable                       (Proxy (Proxy))
 
-import           Data.Code.Lifting
-import           Data.Conn
-import           Data.Env
 
-import           Data.JoinList
 
 import           Data.Interaction                    (Interaction (..))
 import           EILC
@@ -60,8 +42,6 @@ import           Language.Unembedding.PseudoFunction
 import           Data.Incrementalized.Function
 import           Data.Incrementalized.Numeric        ()
 
-import           Control.Arrow                       ((***))
-import           Data.Functor.Identity
 import           Data.IF                             (IF)
 
 import           Data.Incrementalized.Seq            (Seq)
