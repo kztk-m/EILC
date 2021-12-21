@@ -187,6 +187,34 @@ instance HasAtomicDelta Tree where
   --     _ ->
   --       t0
 
+{-
+[Note]
+
+Currently, we consider index-based update operations. On the one hand, such
+updates are hard to write in general. On the other hand, indexed-based updates
+naturally fit for lists, and hence for rose-trees whose children are given by
+lists.
+
+What kind of lists we should consider to support updates such as "insert ...
+under /b/c"? There are a few possible approaches:
+
+  - A list should support a mass update operation: SAll da which applies da to
+    all the elements uniformly. Handling such an operation would be costly
+    because it updates every element in a list at once. Also, we need to prepare
+    an update for a node that perform an update conditionally.
+
+  - Instead, we just support a conditional update operation such as: SAllWith da
+    p that applies da to all the elements that satisfies p. While in this
+    approach we need to change the change structure for nodes, how to handle
+    changes for lists would become much more complicated than the previous
+    approach.
+
+Anyway, our concern here is rather on how to combine primitives, instead of how
+to define primitives.
+
+-}
+
+
 instance NFData (AtomicDelta Tree) where
   rnf (DModChildren dt) = rnf dt
   rnf (DModTag s)       = rnf s
