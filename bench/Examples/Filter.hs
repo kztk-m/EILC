@@ -438,22 +438,28 @@ liftPredicate :: (App IFqS e, Diff a, Typeable a) => Code (a -> Bool) -> e a -> 
 liftPredicate p = lift (trivialIncrementalizationCode p)
 
 q1Filter :: forall t e. (App2 IFqS t e, SumTerm IFqS t DiffMinus, I.IfTerm IFqS t DiffMinus, PFunTerm IFqS t) => EFilter e
-q1Filter = mkElemF "bib" [ keepF /> ((tagF "book" `withF` byAW ) >>> h ) ]
+q1Filter = mkElemF "bib" [
+   keepF />
+    ((tagF "book" `withF` byAW `withF` after1991)
+      >>> mkElemF "book" [
+        keepF /> attrF "year",
+        keepF /> tagF "title"
+     ])
+   ]
   where
     byAW :: EFilter e
     byAW =
       keepF /> tagF "publisher" /> textOfF "Addison-Wesley"
 
-    h :: EFilter e
-    h = mkElemF "book"
-        [ keepF /> attrF "year",
-          keepF /> tagF "title" ]
-        `withF`
-        (keepF /> ifAttrF "year" (\s a -> I.if_ (liftPredicate [|| \(IS.Seq str) -> (read (map unMyChar $ Data.Foldable.toList str) :: Int) > 1991 ||] s) (IS.singletonF a) IS.emptyF) noneF)
-        -- `withF`
-        -- keepF /> tagF "publisher" /> ifTxtF _ noneF
-        -- `withF`
-        -- keepF /> ifFindF "year" _
+    after1991 :: EFilter e
+    after1991 =
+      keepF /> ifAttrF "year" (\s a ->
+                   I.if_ (liftPredicate [|| \str ->
+                                            (read (toString str) :: Int) > 1991 ||] s)
+                         (IS.singletonF a) IS.emptyF) noneF
+
+toString :: MyString -> String
+toString = map unMyChar . Data.Foldable.toList
 
 elm :: I.Fixed String -> [Tree] -> Tree
 elm s ts = Elem s $ IS.fromList ts
@@ -500,6 +506,9 @@ qq1 :: Code (Tree -> (IS.Seq Tree, Interaction (Delta Tree) (Delta (IS.Seq Tree)
 qq1 = compileCode $ runMonoWith (Proxy :: Proxy IFqTU) q1Filter
 
 
+--- >>> exampleDelta
+-- DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 1 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModText (DeltaSeq (fromList [SIns 18 (fromList [MyChar ' ',MyChar '(',MyChar 'S',MyChar 'e',MyChar 'c',MyChar 'o',MyChar 'n',MyChar 'd',MyChar ' ',MyChar 'E',MyChar 'd',MyChar 'i',MyChar 't',MyChar 'i',MyChar 'o',MyChar 'n',MyChar ')'])]))]))]))]))]))]))]))])
+
 -- >>> q1 = $$( qq1 )
 -- >>> let (r, i) = q1 exampleInput
 -- >>> r
@@ -510,6 +519,8 @@ qq1 = compileCode $ runMonoWith (Proxy :: Proxy IFqTU) q1Filter
 -- Elem "bib" (fromList [Elem "book" (fromList [Attr "year" "1994",Elem "title" (fromList [Text "TCP/IP Illustrated (Second Edition)"]),Elem "author" (fromList [Elem "last" (fromList [Text "Stevens"]),Elem "first" (fromList [Text "W."])]),Elem "publisher" (fromList [Text "Addison-Wesley"]),Elem "price" (fromList [Text "65.95"])]),Elem "book" (fromList [Attr "year" "1992",Elem "title" (fromList [Text "Advanced Programming in the Unix environment"]),Elem "author" (fromList [Elem "last" (fromList [Text "Stevens"]),Elem "first" (fromList [Text "W."])]),Elem "publisher" (fromList [Text "Addison-Wesley"]),Elem "price" (fromList [Text "65.95"])]),Elem "book" (fromList [Attr "year" "2000",Elem "title" (fromList [Text "Data on the Web"]),Elem "author" (fromList [Elem "last" (fromList [Text "Abiteboul"]),Elem "first" (fromList [Text "Serge"])]),Elem "author" (fromList [Elem "last" (fromList [Text "Buneman"]),Elem "first" (fromList [Text "Peter"])]),Elem "author" (fromList [Elem "last" (fromList [Text "Suciu"]),Elem "first" (fromList [Text "Dan"])]),Elem "publisher" (fromList [Text "Morgan Kaufmann Publishers"]),Elem "price" (fromList [Text "39.95"])]),Elem "book" (fromList [Attr "year" "1999",Elem "title" (fromList [Text "The Economics of Technology and Content for Digital TV"]),Elem "editor" (fromList [Elem "last" (fromList [Text "Gerbarg"]),Elem "first" (fromList [Text "Darcy"]),Elem "affiliation" (fromList [Text "CITI"])]),Elem "publisher" (fromList [Text "Kluwer Academic Publishers"]),Elem "price" (fromList [Text "129.95"])])])
 -- DeltaSeq (fromList [SRep 0 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 1 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModText (DeltaSeq (fromList [SIns 18 (fromList [MyChar ' ',MyChar '(',MyChar 'S',MyChar 'e',MyChar 'c',MyChar 'o',MyChar 'n',MyChar 'd',MyChar ' ',MyChar 'E',MyChar 'd',MyChar 'i',MyChar 't',MyChar 'i',MyChar 'o',MyChar 'n',MyChar ')'])]))]))]))]))]))]))]))]))])
 -- True
+
+
 
 
 {-
