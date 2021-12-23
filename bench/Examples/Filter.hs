@@ -423,9 +423,11 @@ attrF s = IS.filterF (hasAttrOfF s) Prelude.. keepF
 attrvalF :: (PFunTerm IFqS t, App2 IFqS t e) => String -> String -> EFilter e
 attrvalF s v = IS.filterF (hasAttrValOfF s v) Prelude.. keepF
 
-textOfF :: (PFunTerm IFqS t, App2 IFqS t e) => String -> EFilter e
-textOfF s = IS.filterF (isTextOfF s) Prelude.. keepF
+-- textOfF :: (PFunTerm IFqS t, App2 IFqS t e) => String -> EFilter e
+-- textOfF s = IS.filterF (isTextOfF s) Prelude.. keepF
 
+textOfF :: (App2 IFqS t e, SumTerm IFqS t DiffMinus, I.IfTerm IFqS t DiffMinus) => String -> EFilter e
+textOfF s = ifTxtF (\str e -> I.if_ (liftPredicate [|| \ss -> s == toString ss ||] str) (keepF e) IS.emptyF) noneF
 
 
 (/>) :: (App2 IFqS t e, PFunTerm IFqS t) => EFilter e -> EFilter e -> EFilter e
@@ -495,6 +497,33 @@ exampleInput =
       elm "price" [ Text "129.95" ] ]
   ]
 
+largerInput :: Tree
+largerInput =
+    elm "bib" $ [
+      elm "book" [
+        Attr "year" "1994",
+        elm "title" [ Text "TCP/IP Illustrated" ],
+        elm "author" [ elm "last" [ Text "Stevens" ], elm "first" [ Text "W." ] ],
+        elm "publisher" [ Text "Addison-Wesley" ],
+        elm "price" [ Text "65.95" ] ],
+      elm "book" [
+        Attr "year" "1992",
+        elm "title" [ Text "Advanced Programming in the Unix environment" ],
+        elm "author" [ elm "last" [ Text "Stevens" ], elm "first" [ Text "W." ] ],
+        elm "publisher" [ Text "Addison-Wesley" ],
+        elm "price" [ Text "65.95" ] ]
+    ] ++ take 100 (dummyBooks 0)
+    where
+      dummyBooks :: Int -> [Tree]
+      dummyBooks n =
+        elm (fromString $ "book" ++ show n) [
+          Attr "year" (fromString $ show $ 1990 + n `mod` 4),
+          elm "title" [ Text $ fromString $ "dummy book" ++ show n ],
+          elm "publisher" [ Text (if n `mod` 3 == 0 then "Addison-Wesley" else "Dummy Publisher") ],
+          elm "price" [ Text "99.95" ]
+        ] : dummyBooks (n + 1)
+
+
 exampleDelta :: Delta Tree
 exampleDelta =
   injDelta $ DModChildren $ injDelta $ IS.SRep 0 $
@@ -502,22 +531,24 @@ exampleDelta =
   injDelta $ DModChildren $ injDelta $ IS.SRep 0 $
   injDelta $ DModText $ injDelta $ IS.SIns (length ("TCP/IP Illustrated" :: String)) " (Second Edition)"
 
-qq1 :: Code (Tree -> (IS.Seq Tree, Interaction (Delta Tree) (Delta (IS.Seq Tree))))
-qq1 = compileCode $ runMonoWith (Proxy :: Proxy IFqTU) q1Filter
+qq1 :: Code (Tree -> (Tree, Interaction (Delta Tree) (Delta Tree)))
+qq1 = compileCode $ runMonoWith (Proxy :: Proxy IFqTU) (unsingletonF . q1Filter)
 
 
 --- >>> exampleDelta
 -- DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 1 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModText (DeltaSeq (fromList [SIns 18 (fromList [MyChar ' ',MyChar '(',MyChar 'S',MyChar 'e',MyChar 'c',MyChar 'o',MyChar 'n',MyChar 'd',MyChar ' ',MyChar 'E',MyChar 'd',MyChar 'i',MyChar 't',MyChar 'i',MyChar 'o',MyChar 'n',MyChar ')'])]))]))]))]))]))]))]))])
 
+-- HLS goes to panic for the following code. So, I manually pasted the results from GHCi.
+-- To do so, we need TemplateHaskell and TypeFamilies.
 -- >>> q1 = $$( qq1 )
 -- >>> let (r, i) = q1 exampleInput
 -- >>> r
 -- >>> exampleInput /+ exampleDelta
 -- >>> fst $ runInteraction i exampleDelta
 -- >>> r /+ (fst $ runInteraction i exampleDelta) == fst (q1 $ exampleInput /+ exampleDelta)
--- fromList [Elem "bib" (fromList [Elem "book" (fromList [Attr "year" "1994",Elem "title" (fromList [Text "TCP/IP Illustrated"])]),Elem "book" (fromList [Attr "year" "1992",Elem "title" (fromList [Text "Advanced Programming in the Unix environment"])])])]
+-- Elem "bib" (fromList [Elem "book" (fromList [Attr "year" "1994",Elem "title" (fromList [Text "TCP/IP Illustrated"])]),Elem "book" (fromList [Attr "year" "1992",Elem "title" (fromList [Text "Advanced Programming in the Unix environment"])])])
 -- Elem "bib" (fromList [Elem "book" (fromList [Attr "year" "1994",Elem "title" (fromList [Text "TCP/IP Illustrated (Second Edition)"]),Elem "author" (fromList [Elem "last" (fromList [Text "Stevens"]),Elem "first" (fromList [Text "W."])]),Elem "publisher" (fromList [Text "Addison-Wesley"]),Elem "price" (fromList [Text "65.95"])]),Elem "book" (fromList [Attr "year" "1992",Elem "title" (fromList [Text "Advanced Programming in the Unix environment"]),Elem "author" (fromList [Elem "last" (fromList [Text "Stevens"]),Elem "first" (fromList [Text "W."])]),Elem "publisher" (fromList [Text "Addison-Wesley"]),Elem "price" (fromList [Text "65.95"])]),Elem "book" (fromList [Attr "year" "2000",Elem "title" (fromList [Text "Data on the Web"]),Elem "author" (fromList [Elem "last" (fromList [Text "Abiteboul"]),Elem "first" (fromList [Text "Serge"])]),Elem "author" (fromList [Elem "last" (fromList [Text "Buneman"]),Elem "first" (fromList [Text "Peter"])]),Elem "author" (fromList [Elem "last" (fromList [Text "Suciu"]),Elem "first" (fromList [Text "Dan"])]),Elem "publisher" (fromList [Text "Morgan Kaufmann Publishers"]),Elem "price" (fromList [Text "39.95"])]),Elem "book" (fromList [Attr "year" "1999",Elem "title" (fromList [Text "The Economics of Technology and Content for Digital TV"]),Elem "editor" (fromList [Elem "last" (fromList [Text "Gerbarg"]),Elem "first" (fromList [Text "Darcy"]),Elem "affiliation" (fromList [Text "CITI"])]),Elem "publisher" (fromList [Text "Kluwer Academic Publishers"]),Elem "price" (fromList [Text "129.95"])])])
--- DeltaSeq (fromList [SRep 0 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 1 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModText (DeltaSeq (fromList [SIns 18 (fromList [MyChar ' ',MyChar '(',MyChar 'S',MyChar 'e',MyChar 'c',MyChar 'o',MyChar 'n',MyChar 'd',MyChar ' ',MyChar 'E',MyChar 'd',MyChar 'i',MyChar 't',MyChar 'i',MyChar 'o',MyChar 'n',MyChar ')'])]))]))]))]))]))]))]))]))])
+-- DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 1 (DTree (fromList [DModChildren (DeltaSeq (fromList [SRep 0 (DTree (fromList [DModText (DeltaSeq (fromList [SIns 18 (fromList [MyChar ' ',MyChar '(',MyChar 'S',MyChar 'e',MyChar 'c',MyChar 'o',MyChar 'n',MyChar 'd',MyChar ' ',MyChar 'E',MyChar 'd',MyChar 'i',MyChar 't',MyChar 'i',MyChar 'o',MyChar 'n',MyChar ')'])]))]))]))]))]))]))]))])
 -- True
 
 
@@ -574,12 +605,93 @@ checkAttrC s = fromFunctionsCode [|| checkAttrInit s ||] [|| iterTr (checkAttrTr
 ifAttrF :: (App2 IFqS t e, SumTerm IFqS t DiffMinus) => String -> (e MyString -> EFilter e) -> EFilter e -> EFilter e
 ifAttrF s f g e = eitherF (lift (checkAttrC s) e) (\x -> f (fstF x) (sndF x)) g
 
-pickFunc :: IS.Seq a -> a
-pickFunc (IS.Seq (a S.:<| _)) = a
-pickFunc _                    = error "pickInit: empty sequence"
+unsingletonInit :: IS.Seq a -> a
+unsingletonInit (IS.Seq s@(a S.:<| _)) | S.length s == 1 = a
+unsingletonInit _                    = error "unsingletonF: non-singleton"
 
-pickC :: (Typeable a, DiffMinus a) => IFqS (IS.Seq a) a
-pickC = trivialIncrementalizationCode [|| pickFunc ||]
+unsingletonTrA :: Diff a => AtomicDelta (IS.Seq a) -> Delta a
+unsingletonTrA (IS.SRep n da)
+  | n == 0 = da
+  | otherwise = error $ "unsingletonF: out of range " ++ show n
+unsingletonTrA (IS.SDel i n)
+  | i > 0 || n == 0 = mempty
+  | otherwise       = error "unsingletonF: deletion of more than zero element is not allowed"
+unsingletonTrA (IS.SIns _ (IS.Seq s))
+  | S.null s  = mempty
+  | otherwise = error "unsingletonF: insertion is not allowed"
+unsingletonTrA (IS.SRearr _ _ _) = mempty
 
-pickF :: (Typeable a, DiffMinus a, App IFqS e) => e (IS.Seq a) -> e a
-pickF = lift pickC
+
+unsingletonC :: (Diff a) => IFqS (IS.Seq a) a
+unsingletonC = fromStatelessCode (\a -> [|| unsingletonInit $$a ||]) (\da -> [|| iterTrStateless unsingletonTrA $$da ||])
+
+unsingletonF :: (Typeable a, Diff a, App IFqS e) => e (IS.Seq a) -> e a
+unsingletonF = lift unsingletonC
+
+-- Filters using lists for comparison
+
+type RFilter = Tree -> [Tree]
+
+keepR :: RFilter
+keepR = (:[])
+
+noneR :: RFilter
+noneR = const []
+
+(>>>#) :: RFilter -> RFilter -> RFilter
+f >>># g = concatMap g . f
+
+childrenR :: RFilter
+childrenR (Elem _ ts) = toList ts -- conversion happens
+childrenR _           = []
+
+tagR :: String -> RFilter
+tagR s t@(Elem s' _) | s == I.getFixed s' = [t]
+tagR _ _ = []
+
+attrR :: String -> RFilter
+attrR s t@(Attr s' _) | s == I.getFixed s' = [t]
+attrR _ _ = []
+
+mkElemR :: String -> [RFilter] -> RFilter
+mkElemR s rs = keepR . Elem (I.Fixed s) . IS.fromList . cats rs
+  where
+    cats ts e = concatMap ($ e) ts
+
+withR :: RFilter -> RFilter -> RFilter
+f `withR` g = filter (not . null . g) . f
+
+ifTxtR :: (MyString -> RFilter) -> RFilter -> RFilter
+ifTxtR f _ t@(Text s) = f s t
+ifTxtR _ g t          = g t
+
+ifAttrR :: String -> (MyString -> RFilter) -> RFilter -> RFilter
+ifAttrR s f _ t@(Attr s' v) | s == I.getFixed s' = f v t
+ifAttrR _ _ g t                                  = g t
+
+(/>#) :: RFilter -> RFilter -> RFilter
+f /># g = f >>># childrenR >>># g
+
+q1FilterR :: RFilter
+q1FilterR = mkElemR "bib" [
+   keepR />#
+    ((tagR "book" `withR` byAW `withR` after1991)
+      >>># mkElemR "book" [
+        keepR /># attrR "year",
+        keepR /># tagR "title"
+     ])
+   ]
+  where
+    byAW =
+      keepR /># tagR "publisher" /># textOfR "Addison-Wesley"
+
+    after1991 =
+      keepR /># ifAttrR "year" (\s -> if (read (toString s) :: Int) > 1991 then keepR else noneR) noneR
+
+    textOfR str = ifTxtR (\s -> if toString s == str then keepR else noneR) noneR
+
+q1R :: Tree -> Tree
+q1R = unsingleton . q1FilterR
+  where
+    unsingleton [a] = a
+    unsingleton _   = error "unsingleton: expected singleton"
