@@ -169,52 +169,52 @@ emptyC =
 emptyF :: (App IFqS e, Diff a, Typeable a) => e (Seq a)
 emptyF = Unemb.lift emptyC Unemb.unit
 
-type AppendCache = (Int, Int)
+data AppendCache = AppendCache !Int !Int
 
 appendInit :: (Seq a, Seq a) -> (Seq a, AppendCache)
 appendInit (Seq a1 , Seq a2) =
-  (Seq $ a1 Seq.>< a2, (Seq.length a1, Seq.length a2))
+  (Seq $ a1 Seq.>< a2, AppendCache (Seq.length a1) (Seq.length a2))
 
 appendTrAtomic ::
   Diff a =>
   AtomicDelta (Seq a, Seq a)
   -> AppendCache
   -> (Delta (Seq a), AppendCache)
-appendTrAtomic dab (l1, l2) = case dab of
+appendTrAtomic dab (AppendCache l1 l2) = case dab of
   ADFst (SIns i as) ->
-    let i' = min i l1
-    in (injDelta $ SIns i' as, (l1 + Seq.length (unSeq as), l2))
+    let !i' = min i l1
+    in (injDelta $ SIns i' as, AppendCache (l1 + Seq.length (unSeq as)) l2)
   ADFst (SDel i n) ->
-    let i' = min i l1
-        n' = min n (l1 - i')
-    in (injDelta $ SDel i' n', (l1 - n', l2))
+    let !i' = min i l1
+        !n' = min n (l1 - i')
+    in (injDelta $ SDel i' n', AppendCache (l1 - n') l2)
   ADFst (SRep i da) ->
     if 0 <= i && i < l1 then
-      (srep i da, (l1, l2))
+      (srep i da, AppendCache l1 l2)
     else
-      (mempty, (l1, l2))
+      (mempty, AppendCache l1 l2)
   ADFst (SRearr i n j) ->
-    let i' = min i l1
-        n' = min n (l1 - i')
-        j' = min j (l1 - n')
-    in (injDelta $ SRearr i' n' j', (l1, l2))
+    let !i' = min i l1
+        !n' = min n (l1 - i')
+        !j' = min j (l1 - n')
+    in (injDelta $ SRearr i' n' j', AppendCache l1 l2)
   ADSnd (SIns i as) ->
-    let i' = min i l2
-    in (injDelta $ SIns (i' + l1) as, (l1, l2 + Seq.length (unSeq as)))
+    let !i' = min i l2
+    in (injDelta $ SIns (i' + l1) as, AppendCache l1 (l2 + Seq.length (unSeq as)))
   ADSnd (SDel i n) ->
-    let i' = min i l2
-        n' = min n (l2 - i')
-    in (injDelta $ SDel (i' + l1) n', (l1, l2 - n'))
+    let !i' = min i l2
+        !n' = min n (l2 - i')
+    in (injDelta $ SDel (i' + l1) n', AppendCache l1 (l2 - n'))
   ADSnd (SRep i da) ->
     if 0 <= i && i < l2 then
-      (srep (i + l1) da, (l1, l2))
+      (srep (i + l1) da, AppendCache l1 l2)
     else
-      (mempty, (l1, l2))
+      (mempty, AppendCache l1 l2)
   ADSnd (SRearr i n j) ->
-    let i' = min i l1
-        n' = min n (l1 - i')
-        j' = min j (l1 - n')
-    in (injDelta $ SRearr (l1 + i') n' (l1 + j'), (l1, l2))
+    let !i' = min i l1
+        !n' = min n (l1 - i')
+        !j' = min j (l1 - n')
+    in (injDelta $ SRearr (l1 + i') n' (l1 + j'), AppendCache l1 l2)
 
 appendC :: Diff a => IFqS (Seq a, Seq a) (Seq a)
 appendC = fromFunctionsCode [|| appendInit ||] [|| iterTr appendTrAtomic ||]
@@ -244,14 +244,14 @@ concatTrAtomic ::
 concatTrAtomic (SIns i s') c =
   -- in this case, a sequence s' is inserted at ith element
   let !toI = sum (Seq.take i c)
-      !c'  = insAtC i (makeConcatCache s') c
+      c'  = insAtC i (makeConcatCache s') c
   in (injDelta $! SIns toI (Control.Monad.join s'), c')
 concatTrAtomic (SDel i n) c =
   let (!c1, !c23) = Seq.splitAt i c
       (!c2, !c3)  = Seq.splitAt n c23
       !toI        = sum c1
       !toN        = sum c2
-      !c'         = c1 Seq.>< c3
+      c'         = c1 Seq.>< c3
   in (injDelta $! SDel toI toN, c')
 concatTrAtomic (SRearr i n j) c =
   let (!c1, !c23) = Seq.splitAt i c
@@ -260,7 +260,7 @@ concatTrAtomic (SRearr i n j) c =
       !toN        = sum c2
       !c13        = c1 Seq.>< c3
       !toJ        = sum $ Seq.take j c13
-      !c'         = insAtC j c2 c13
+      c'         = insAtC j c2 c13
   in -- trace (printf "SRearr %d %d %d" i n j ++ " -> " ++ printf "SRearr %d %d %d" toI toN toJ ++ " when cache is: " ++ show c ++ " -> " ++ show c) $
      (injDelta $! SRearr toI toN toJ, c' )
 
@@ -269,7 +269,7 @@ concatTrAtomic (SRep i ds) c
   | Just !ci <- Seq.lookup i c =
   let !offset = sum $ Seq.take i c
       !(!ds', !ci') = iterTr (goAtomic offset) ds ci
-      !c' = Seq.update i ci' c
+      c' = Seq.update i ci' c
   in (ds', c')
   where
     goAtomic :: Diff a => Int -> AtomicDelta (Seq a) -> Int -> (Delta (Seq a), Int)
@@ -464,8 +464,8 @@ filterTrUnchangedAtomic p deriv_p dseq cc = case dseq of
         let !i' = length $ Seq.filter snd3 $ Seq.take i cc
             (!db, ci') = deriv_p da ci
             ai' = ai /+ da
-            !cc' = Seq.update i (ai', bi /+ db, ci') cc
-            up  = case (bi, db) of
+            cc' = Seq.update i (ai', bi /+ db, ci') cc
+            !up  = case (bi, db) of
                     (True,  DBNot) -> injDelta (SDel i' 1)
                     (True,  DBKeep) -> injDelta (SRep i' da)
                     (False, DBNot) -> injDelta (SIns i' (Seq $ Seq.singleton ai'))
@@ -488,7 +488,7 @@ filterTrChanged ::
   -> CommonFilterCache a c -> (Delta (Seq a), CommonFilterCache a c)
 filterTrChanged df cs =
   let (ds, cs',_) =
-        foldl' (\(deltas, accCS, i) (a, b, c) ->
+        foldl' (\(deltas, accCS, !i) (a, b, c) ->
                      let (db, c') = df c
                          b' = b /+ db
                          accCS' = accCS Seq.|> (a, b', c')
