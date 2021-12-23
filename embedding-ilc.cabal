@@ -104,6 +104,7 @@ benchmark sequence
     hs-source-dirs: bench
     main-is: SequenceBench.hs 
     other-modules: 
+        BenchUtil 
         Examples.Sequence 
     other-extensions: TemplateHaskell 
     build-depends: 
@@ -124,6 +125,7 @@ benchmark tree
     hs-source-dirs: bench
     main-is: FilterBench.hs 
     other-modules: 
+        BenchUtil 
         Examples.Filter
     other-extensions: TemplateHaskell 
     build-depends: 

@@ -26,6 +26,7 @@ import           Data.IF                  (IFT)
 import           Data.Incrementalized.Seq as IS
 import           Data.Proxy               (Proxy (..))
 
+import           BenchUtil
 
 sequence1 :: Seq Int
 sequence1 = IS.fromList [1..100]
@@ -68,13 +69,13 @@ tryInc h initial ds =
       !dres = iterations it ds
   in foldl' (/+) res dres
 
-tryScratch :: (NFData b, Diff a) => (a -> b) -> a -> [Delta a] -> b
-tryScratch = go
-  where
-    go f a [] = f a
-    go f a (da : ds) =
-      let !a' = a /+ da
-      in f a' `deepseq` go f a' ds
+-- tryScratch :: (NFData b, Diff a) => (a -> b) -> a -> [Delta a] -> b
+-- tryScratch = go
+--   where
+--     go f a [] = f a
+--     go f a (da : ds) =
+--       let !a' = a /+ da
+--       in f a' `deepseq` go f a' ds
 
 
 cartesianS :: (Seq Int, Seq Int) -> Seq (Int, Int)
@@ -97,26 +98,39 @@ forProf :: ()
 forProf =
   rnf $ tryInc dCartesianTU (mkInitSequences 1000) (insOuter 100 <> insInner 100)
 
-doBench :: String -> (Seq Int, Seq Int) -> [Delta (Seq Int, Seq Int)] -> Benchmark
-doBench gname a0 ds =
-  env (return (a0, ds)) $ \ ~(a0', ds') ->
-    bgroup gname [
-      bench "Scratch" $ nf (tryScratch cartesianS a0') ds',
-      bench "T"       $ nf (tryInc dCartesianT a0') ds' ,
-      bench "T-Opt"   $ nf (tryInc dCartesianTU  a0') ds',
-      bench "Raw"     $ nf (tryInc dCartesianRaw a0') ds'
-    ]
+-- doBench :: String -> (Seq Int, Seq Int) -> [Delta (Seq Int, Seq Int)] -> Benchmark
+-- doBench gname a0 ds =
+--   env (return (a0, ds)) $ \ ~(a0', ds') ->
+--     bgroup gname [
+--       bench "Scratch" $ nf (tryScratch cartesianS a0') ds',
+--       bench "T"       $ nf (tryInc dCartesianT a0') ds' ,
+--       bench "T-Opt"   $ nf (tryInc dCartesianTU  a0') ds',
+--       bench "Raw"     $ nf (tryInc dCartesianRaw a0') ds'
+--     ]
 
+bfunc :: [BenchType (Seq Int, Seq Int) (Seq (Int, Int))]
+bfunc = [ Scratch "Scratch" cartesianS,
+          Incrementalized "T" dCartesianT,
+          Incrementalized "T-Opt" dCartesianTU,
+          Incrementalized "Raw" dCartesianRaw ]
 
 main :: IO ()
 -- main = print $! forProf
 main = defaultMain [
-    doBench "100-1-0" (mkInitSequences 100) (insOuter 1),
-    doBench "100-0-1" (mkInitSequences 100) (insInner 1),
-    doBench "200-1-0" (mkInitSequences 200) (insOuter 1),
-    doBench "200-0-1" (mkInitSequences 200) (insInner 1),
-    doBench "200-10-0" (mkInitSequences 200) (insOuter 10),
-    doBench "200-0-10" (mkInitSequences 200) (insInner 10),
-    doBench "200-20-0" (mkInitSequences 200) (insOuter 20),
-    doBench "200-0-20" (mkInitSequences 200) (insInner 20)
+  benchsuit "100-1-0" (mkInitSequences 100) (insOuter 1) bfunc,
+  benchsuit "100-0-1" (mkInitSequences 100) (insInner 1) bfunc,
+  benchsuit "200-1-0" (mkInitSequences 200) (insOuter 1) bfunc,
+  benchsuit "200-0-1" (mkInitSequences 200) (insInner 1) bfunc,
+  benchsuit "200-10-0" (mkInitSequences 200) (insOuter 10) bfunc,
+  benchsuit "200-0-10" (mkInitSequences 200) (insInner 10) bfunc,
+  benchsuit "200-20-0" (mkInitSequences 200) (insOuter 20) bfunc,
+  benchsuit "200-0-20" (mkInitSequences 200) (insInner 20) bfunc
+    -- doBench "100-1-0" (mkInitSequences 100) (insOuter 1),
+    -- doBench "100-0-1" (mkInitSequences 100) (insInner 1),
+    -- doBench "200-1-0" (mkInitSequences 200) (insOuter 1),
+    -- doBench "200-0-1" (mkInitSequences 200) (insInner 1),
+    -- doBench "200-10-0" (mkInitSequences 200) (insOuter 10),
+    -- doBench "200-0-10" (mkInitSequences 200) (insInner 10),
+    -- doBench "200-20-0" (mkInitSequences 200) (insOuter 20),
+    -- doBench "200-0-20" (mkInitSequences 200) (insInner 20)
   ]
