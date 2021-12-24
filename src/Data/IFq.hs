@@ -17,8 +17,8 @@ module Data.IFq (
 
   fstF, sndF,
 
-  -- * Exporting for spliced code
-  mkInteraction, ensureDiffType,
+  -- -- * Exporting for spliced code
+  -- mkInteraction, ensureDiffType,
   ) where
 
 
@@ -143,12 +143,13 @@ multIFq (IFq h1) (IFq h2) = IFq $ \s -> do
   return (r, CodeInteractionStep (joinConn c1init c2init) step)
 
 
+-- ensureDiffType :: (Proxy a -> Proxy b -> a -> (b, Interaction (Delta a) (Delta b))) -> (a -> (b, Interaction (Delta a) (Delta b)))
+-- ensureDiffType f = f Proxy Proxy
+-- {-# INLINE ensureDiffType #-}
 
-ensureDiffType :: (Proxy a -> Proxy b -> a -> (b, Interaction (Delta a) (Delta b))) -> (a -> (b, Interaction (Delta a) (Delta b)))
-ensureDiffType f = f Proxy Proxy
-
-mkInteraction :: Proxy a -> Proxy b -> (Delta a -> (Delta b, Interaction (Delta a) (Delta b))) -> Interaction (Delta a) (Delta b)
-mkInteraction _ _ = Interaction
+-- mkInteraction :: Proxy a -> Proxy b -> (Delta a -> (Delta b, Interaction (Delta a) (Delta b))) -> Interaction (Delta a) (Delta b)
+-- mkInteraction _ _ = Interaction
+-- {-# INLINE mkInteraction #-}
 
 -- eqProxy :: Proxy a -> Proxy a -> b -> b
 -- eqProxy _ _ x = x
@@ -189,28 +190,41 @@ runIFq :: forall a b cs.
   (Code a -> CodeC (Code b, Conn PackedCode cs))
    -> (Code (Delta a) -> Conn PackedCode cs -> CodeC (Code (Delta b), Conn PackedCode cs))
     -> Code (a -> (b, Interaction (Delta a) (Delta b) ))
-runIFq = \f tr ->
-                 [|| ensureDiffType $ \pa pb a ->
-                         $$(toCode $ do (b, c) <- f [|| a ||]
-                                        let rtr = mkRTr [|| pa ||] [|| pb ||] tr c
-                                        return [|| ($$b, $$rtr) ||])
-                  ||]
-  where
-    mkRTr :: forall cs'. Code (Proxy a) -> Code (Proxy b) -> (Code (Delta a) -> Conn PackedCode cs' -> CodeC (Code (Delta b), Conn PackedCode cs')) -> Conn PackedCode cs' -> Code (Interaction (Delta a) (Delta b))
-    mkRTr pa pb tr c =
-      [||
-         let func = $$(mkAbsBang pc $ \cs ->
-                        [|| mkInteraction $$pa $$pb $ \da ->
-                               $$( runCodeC (tr [|| da ||] cs) $ \(db, cs') -> [|| ($$db, $$( mkApp [|| func ||] cs' )) ||] )
-                        ||])
-         in $$( mkApp [|| func ||] c )
-      ||]
-      -- [|| let func cp = mkInteraction $$pa $$pb $ \da ->
-      --                       $$(code2conn pc [|| cp ||] $ \cs ->
-      --                           runCodeC (tr [|| da ||] cs) $ \(db, cs') -> [|| ($$db, func $$(conn2code cs')) ||])
-      --     in func $$(conn2code c) ||]
-      where
-        pc = map2Conn (const Proxy) c
+runIFq f tr =
+  [||
+   \a -> $$(toCode $ do
+              (b, cs0) <- f [|| a ||]
+              let pc = map2Conn (const Proxy) cs0
+              i <- CodeC $ \k -> [||
+                    let int_func = $$(mkAbsBang pc $ \cs ->
+                          [|| Interaction $ \da -> $$(toCode $ do
+                                (db, cs') <- tr [|| da ||] cs
+                                return [|| ($$db , $$( mkApp [|| int_func ||] cs')) ||]) ||])
+                    in $$(k (mkApp [|| int_func ||] cs0)) ||]
+              return [|| ($$b, $$i) ||] )
+  ||]
+-- runIFq = \f tr ->
+--                  [|| ensureDiffType $ \pa pb a ->
+--                          $$(toCode $ do (b, c) <- f [|| a ||]
+--                                         let rtr = mkRTr [|| pa ||] [|| pb ||] tr c
+--                                         return [|| ($$b, $$rtr) ||])
+--                   ||]
+--   where
+--     mkRTr :: forall cs'. Code (Proxy a) -> Code (Proxy b) -> (Code (Delta a) -> Conn PackedCode cs' -> CodeC (Code (Delta b), Conn PackedCode cs')) -> Conn PackedCode cs' -> Code (Interaction (Delta a) (Delta b))
+--     mkRTr pa pb tr c =
+--       [||
+--          let func = $$(mkAbsBang pc $ \cs ->
+--                         [|| mkInteraction $$pa $$pb $ \da ->
+--                                $$( runCodeC (tr [|| da ||] cs) $ \(db, cs') -> [|| ($$db, $$( mkApp [|| func ||] cs' )) ||] )
+--                         ||])
+--          in $$( mkApp [|| func ||] c )
+--       ||]
+--       -- [|| let func cp = mkInteraction $$pa $$pb $ \da ->
+--       --                       $$(code2conn pc [|| cp ||] $ \cs ->
+--       --                           runCodeC (tr [|| da ||] cs) $ \(db, cs') -> [|| ($$db, func $$(conn2code cs')) ||])
+--       --     in func $$(conn2code c) ||]
+--       where
+--         pc = map2Conn (const Proxy) c
 
 instance Cartesian IFq where
   multS = multIFq
@@ -326,7 +340,8 @@ instance IncrementalizedQ IFqS where
 
 fstF :: forall e a b. (Diff a, Typeable a, Diff b, Typeable b, App IFqS e) => e (a, b) -> e a
 fstF = lift (fstS Proxy Proxy)
+{-# INLINE fstF #-}
 
 sndF :: forall e a b. (Diff a, Typeable a, Diff b, Typeable b, App IFqS e) => e (a, b) -> e b
 sndF = lift (sndS Proxy Proxy)
-
+{-# INLINE sndF #-}
