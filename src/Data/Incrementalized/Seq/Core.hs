@@ -31,9 +31,11 @@ module Data.Incrementalized.Seq.Core
 
 import qualified Data.Foldable
 import qualified Data.Sequence                 as Seq
+import qualified Data.Sequence.Internal        as SeqI
 import           Prelude                       hiding (id, (.))
 import qualified Text.Show                     as TS
 
+-- import           Control.Arrow                 ((***))
 import           Control.DeepSeq               (NFData, rnf)
 import qualified Control.Monad
 import           Data.Delta
@@ -48,6 +50,26 @@ import           Language.Unembedding          as Unemb
 
 -- import           Debug.Trace                   (trace)
 -- import           Text.Printf
+
+-- class NFDataSpine a where
+--   rnfSpine :: a -> ()
+
+-- forceSpine :: NFDataSpine a => a -> a
+-- forceSpine x = rnfSpine x `seq` x
+-- instance NFDataSpine (Seq.Seq a) where
+--   rnfSpine (SeqI.Seq x) = rnfSpine x
+
+-- instance NFDataSpine a => NFDataSpine (SeqI.FingerTree a) where
+--   rnfSpine SeqI.EmptyT         = ()
+--   rnfSpine (SeqI.Single a)     = rnfSpine a
+--   rnfSpine (SeqI.Deep _ _ f _) = rnfSpine f
+
+-- instance NFDataSpine (SeqI.Elem a) where
+--   rnfSpine _ = ()
+
+-- instance NFDataSpine a => NFDataSpine (SeqI.Node a) where
+--   rnfSpine (SeqI.Node2 _ x y)   = rnfSpine x `seq` rnfSpine y
+--   rnfSpine (SeqI.Node3 _ x y z) = rnfSpine x `seq` rnfSpine y `seq` rnfSpine z
 
 newtype Seq a = Seq { unSeq :: Seq.Seq a }
   deriving stock (Eq, Functor, Foldable, Traversable)
@@ -121,6 +143,19 @@ srep :: Diff a => Int -> Delta a -> Delta (Seq a)
 srep i da
   | checkEmpty da = mempty
   | otherwise     = injDelta $ SRep i da
+
+-- deleting 0 elements is identity.
+-- "filter" is the only API that can violate this invariant.
+sdel :: Diff a => Int -> Int -> Delta (Seq a)
+sdel _ 0 = mempty
+sdel i n = injDelta $ SDel i n
+
+-- inesrting 0 elements is identity.
+-- "filter" is the only API that can violate this invariant.
+sins :: Diff a => Int -> Seq a -> Delta (Seq a)
+sins _ (Seq xs) | Seq.null xs = mempty
+sins n xs = injDelta $ SIns n xs
+
 
 insSeq :: Int -> Seq.Seq a -> Seq.Seq a -> Seq.Seq a
 insSeq !i !s' !s0 =
@@ -353,9 +388,9 @@ mapInit (PFunIFqS (FunCache isClosed f deriv_f)) =
   PFunIFqS (FunCache isClosed h deriv_h)
   where
     h (Seq as) =
-      let (!bs, !cs) = Seq.unzip $ fmap f as
-      in (Seq bs,
-           case isClosed of { Closed -> MapCacheClosed cs; Open ->  MapCacheOpen f cs})
+      let (!bs, !cs) = {-# SCC "mapInit:fmap" #-} Seq.unzip $ fmap f as
+          !mcs = case isClosed of { Closed -> MapCacheClosed cs; Open ->  MapCacheOpen f cs}
+      in (Seq bs, mcs)
     deriv_h das (MapCacheClosed cs) =
       let (!db, !cs') = iterTr (mapTrUnchangedAtomic f deriv_f) das cs
       in (db, MapCacheClosed cs')
@@ -408,7 +443,9 @@ True for an element must insert the element.
 
 -}
 
-type CommonFilterCache a c = Seq.Seq (a, Bool, c)
+data FTriple a c = FTriple !a !Bool !c
+
+type CommonFilterCache a c = Seq.Seq (FTriple a c)
 
 data FilterCache a c
   = FilterCacheOpen   !(a -> (Bool, c)) !(CommonFilterCache a c)
@@ -432,10 +469,10 @@ data FilterCache a c
 -- modifyOrigSeq u (FilterCacheOpen f orig cs) = FilterCacheOpen f (u orig) cs
 -- modifyOrigSeq _ (FilterCacheClosed orig cs) = FilterCacheClosed (u orig) cs
 
-fst3 :: (a, b, c) -> a
-fst3 (a, _, _) = a
-snd3 :: (a, b, c) -> b
-snd3 (_, b, _) = b
+fst3 :: FTriple a c  -> a
+fst3 (FTriple a _ _) = a
+snd3 :: FTriple a c -> Bool
+snd3 (FTriple _ b _) = b
 
 
 
@@ -447,24 +484,24 @@ filterTrUnchangedAtomic ::
 filterTrUnchangedAtomic p deriv_p dseq cc = case dseq of
   SIns i (Seq as) ->
     let !i'  = length $ Seq.filter snd3 $ Seq.take i cc
-        !bs  = fmap (\a -> let (b, c) = p a in (a, b, c)) as
+        !bs  = fmap (\a -> let (b, c) = p a in FTriple a b c) as
         !as' = fst3 <$> Seq.filter snd3 bs
         cc' = insSeq i bs cc
-    in (injDelta $! SIns i' (Seq as'), cc')
+    in (sins i' (Seq as'), cc')
   SDel i n ->
     let (!cs1, cs23) = Seq.splitAt i cc
         !cs2         = Seq.take n cs23
         !i' = length $ Seq.filter snd3 cs1
         !n' = length $ Seq.filter snd3 cs2
         cc' = delSeq i n cc
-    in (injDelta $! SDel i' n', cc')
+    in (sdel i' n', cc')
   SRep i da ->
     case Seq.lookup i cc of
-      Just (ai, bi, ci) ->
+      Just (FTriple ai bi ci) ->
         let !i' = length $ Seq.filter snd3 $ Seq.take i cc
             (!db, ci') = deriv_p da ci
             ai' = ai /+ da
-            cc' = Seq.update i (ai', bi /+ db, ci') cc
+            cc' = Seq.update i (FTriple ai' (bi /+ db) ci') cc
             !up  = case (bi, db) of
                     (True,  DBNot) -> injDelta (SDel i' 1)
                     (True,  DBKeep) -> injDelta (SRep i' da)
@@ -488,10 +525,10 @@ filterTrChanged ::
   -> CommonFilterCache a c -> (Delta (Seq a), CommonFilterCache a c)
 filterTrChanged df cs =
   let (ds, cs',_) =
-        foldl' (\(deltas, accCS, !i) (a, b, c) ->
+        foldl' (\(deltas, accCS, !i) (FTriple a b c) ->
                      let (db, c') = df c
                          b' = b /+ db
-                         accCS' = accCS Seq.|> (a, b', c')
+                         accCS' = accCS Seq.|> FTriple a b' c'
                      in case (b, db) of
                           (True,  DBNot) -> (deltas <> injDelta (SDel i 1), accCS', i)
                           (False, DBNot) -> (deltas <> injDelta (SIns i (Seq $ Seq.singleton a)), accCS', i + 1)
@@ -506,9 +543,10 @@ filterInit (PFunIFqS (FunCache isClosed f deriv_f)) =
   PFunIFqS (FunCache isClosed h deriv_h)
   where
     h (Seq as) =
-      let (!bs, !cs) = Seq.unzip $ fmap (\a -> let (b, c) = f a in ((b, a), (a, b, c)))  as
-      in (Seq $ snd <$> Seq.filter fst bs,
-           case isClosed of { Closed -> FilterCacheClosed cs; Open ->  FilterCacheOpen f cs})
+      let (!bs, !cs) = {-# SCC "filterInit:fmap" #-} Seq.unzip $ fmap (\a -> let (b, c) = f a in ((b, a), FTriple a b c))  as
+          !rs  = Seq $ snd <$> Seq.filter fst bs
+          !fcs = case isClosed of { Closed -> FilterCacheClosed cs; Open ->  FilterCacheOpen f cs}
+      in (rs, fcs)
     deriv_h das (FilterCacheClosed cs) =
       let (!db, !cs') = iterTr (filterTrUnchangedAtomic f deriv_f) das cs
       in (db, FilterCacheClosed cs')
