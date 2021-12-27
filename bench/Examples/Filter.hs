@@ -141,10 +141,10 @@ instance HasAtomicDelta Tree where
   -- there is not necessarly a change dt for given two trees t1 and t2 such that
   -- t1 /+ dt = t2.
   data instance AtomicDelta Tree
-    = DModChildren (Delta (IS.Seq Tree))
-    | DModTag  String
-    | DModAttr String (Delta MyString) -- change the attribute's value
-    | DModText (Delta MyString) -- modifies a string
+    = DModChildren !(Delta (IS.Seq Tree))
+    | DModTag  !String
+    | DModAttr !String !(Delta MyString) -- change the attribute's value
+    | DModText !(Delta MyString) -- modifies a string
     deriving stock Show
 
   injDelta = DTree Prelude.. pure
@@ -467,7 +467,7 @@ elm :: I.Fixed String -> [Tree] -> Tree
 elm s ts = Elem s $ IS.fromList ts
 
 exampleInput :: Tree
-exampleInput =
+exampleInput = Control.DeepSeq.force $
   elm "bib" [
     elm "book" [
       Attr "year" "1994",
@@ -498,7 +498,7 @@ exampleInput =
   ]
 
 largerInput :: Tree
-largerInput =
+largerInput = Control.DeepSeq.force $
     elm "bib" $ [
       elm "book" [
         Attr "year" "1994",
