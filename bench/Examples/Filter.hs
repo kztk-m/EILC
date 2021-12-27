@@ -513,23 +513,31 @@ largerInput =
         elm "publisher" [ Text "Addison-Wesley" ],
         elm "price" [ Text "65.95" ] ]
     ] ++ take 100 (dummyBooks 0)
-    where
-      dummyBooks :: Int -> [Tree]
-      dummyBooks n =
-        elm (fromString $ "book" ++ show n) [
-          Attr "year" (fromString $ show $ 1990 + n `mod` 4),
-          elm "title" [ Text $ fromString $ "dummy book" ++ show n ],
-          elm "publisher" [ Text (if n `mod` 3 == 0 then "Addison-Wesley" else "Dummy Publisher") ],
-          elm "price" [ Text "99.95" ]
-        ] : dummyBooks (n + 1)
+
+
+dummyBooks :: Int -> [Tree]
+dummyBooks n =
+  elm (fromString "book") [
+    Attr "year" (fromString $ show $ 1990 + n `mod` 4),
+    elm "title" [ Text $ fromString $ "dummy book" ++ show n ],
+    elm "publisher" [ Text (if n `mod` 3 == 0 then "Addison-Wesley" else "Dummy Publisher") ],
+    elm "price" [ Text "99.95" ]
+  ] : dummyBooks (n + 1)
 
 
 exampleDelta :: Delta Tree
-exampleDelta =
+exampleDelta = Control.DeepSeq.force $
   injDelta $ DModChildren $ injDelta $ IS.SRep 0 $
   injDelta $ DModChildren $ injDelta $ IS.SRep 1 $
   injDelta $ DModChildren $ injDelta $ IS.SRep 0 $
   injDelta $ DModText $ injDelta $ IS.SIns (length ("TCP/IP Illustrated" :: String)) " (Second Edition)"
+
+exampleDeltas :: Int -> [Delta Tree]
+exampleDeltas n = Control.DeepSeq.force $
+  concatMap (\t -> [ h t , del]) (take n $ dummyBooks 0)
+  where
+    del = injDelta $ DModChildren $ injDelta $ IS.SDel 0 1
+    h x = injDelta $ DModChildren $ injDelta $ IS.SIns 0 (IS.Seq $ S.singleton x)
 
 qq1 :: Code (Tree -> (Tree, Interaction (Delta Tree) (Delta Tree)))
 qq1 = compileCode $ runMonoWith (Proxy :: Proxy IFqTU) (unsingletonF . q1Filter)

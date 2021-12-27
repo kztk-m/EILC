@@ -6,6 +6,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 import           Control.DeepSeq  (NFData, deepseq, rnf)
 import           Data.Delta
+import           Data.Foldable    (foldl')
 import           Data.Interaction
 import           Examples.Filter
 
@@ -23,8 +24,8 @@ nf n f x =
 
 main :: IO ()
 main = do
-  let res = nf 100 (\input ->
+  let res = nf 10 (\input ->
         let (r, i) = inc_q1 input
-            (dr, _i') = runInteraction i exampleDelta
-        in r /+ dr) largerInput
+            drs = iterations i (exampleDeltas 100) -- [exampleDelta]
+        in foldl' (/+) r drs) largerInput
   print $ rnf res
