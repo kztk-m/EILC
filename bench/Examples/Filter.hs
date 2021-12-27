@@ -60,8 +60,8 @@ data Tree = Elem !(I.Fixed String) !(IS.Seq Tree)
 --  deriving stock (Show , Eq)
 
 instance NFData Tree where
-  rnf (Elem _ ts) = rnf (IS.unSeq ts)
-  rnf (Attr _ v)  = rnf (IS.unSeq v)
+  rnf (Elem s ts) = rnf (s, IS.unSeq ts)
+  rnf (Attr s v)  = rnf (s, IS.unSeq v)
   rnf (Text v)    = rnf (IS.unSeq v)
 
 instance Show Tree where
