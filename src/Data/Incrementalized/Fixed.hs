@@ -15,10 +15,10 @@ module Data.Incrementalized.Fixed
 
   ) where
 
+import           Control.DeepSeq            (NFData)
 import           Data.Group
-import           Language.Haskell.TH.Syntax (Lift)
-
 import           Data.String
+import           Language.Haskell.TH.Syntax (Lift)
 
 import           Data.Delta
 import           Data.IFq
@@ -26,9 +26,11 @@ import           Data.Incrementalized
 import           Data.Typeable
 import           Language.Unembedding
 
+
+
 -- | @Fixed a@ is a variant of @a@ to which changes are always the empty change.
 newtype Fixed a = Fixed { getFixed :: a }
-  deriving newtype (Num, Ord, Eq, Enum, Bounded, IsString, Semigroup, Monoid, Group, Abelian)
+  deriving newtype (Num, Ord, Eq, Enum, Bounded, IsString, Semigroup, Monoid, Group, Abelian, NFData)
   deriving stock   (Show, Read, Functor, Foldable, Traversable, Lift)
 
 -- | @NoUpdate@ is only the change allowed for @Fixed a@.
