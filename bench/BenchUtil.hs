@@ -11,6 +11,8 @@ import           Data.Delta
 import           Data.Interaction
 import           Data.List        (foldl', scanl')
 
+import           Debug.Trace
+
 data BenchType a b
   = Scratch !String !(a -> b)
   | Incrementalized !String !(a -> (b, Interaction (Delta a) (Delta b)))
@@ -28,15 +30,20 @@ benchsuit ::
   => String -> a -> [Delta a] -> [BenchType a b] -> Benchmark
 benchsuit gname input deltas0 bs =
   env ini $ \ ~(inputs, deltas) ->
-    let doBench (Scratch bname f) = bench bname $ nf (map f) inputs
-        doBench (Incrementalized bname f) = bench bname $
-          nf (\ds ->
-                let (b, i)   = f (head inputs)
+    let doBench (Scratch bname f) =
+          let loop []     = ()
+              loop (i:is) = deepseq (f i) (loop is)
+          in bench bname $ nf loop inputs
+        doBench (Incrementalized bname f) =
+          bench bname $
+          nf (\(is, ds) ->
+                let !(b, i)   = f (head is)
                     odeltas =  iterations i ds
-                in b `deepseq` foldl' (/+) b odeltas) deltas
+                in b `deepseq` foldl' (/+) b odeltas) (inputs, deltas)
     in bgroup gname $ map doBench bs
   where
-    ini = return (scanl' (/+) input deltas0, deltas0)
+    ini = let is = scanl' (/+) input deltas0
+          in is `deepseq` deltas0 `deepseq` return (is, deltas0)
 
 -- Without initial running cost
 benchsuit' ::

@@ -80,7 +80,8 @@ tryInc h initial ds =
 
 cartesianS :: (Seq Int, Seq Int) -> Seq (Int, Int)
 cartesianS (xs, ys) =
-  xs >>= \x -> fmap (\y -> (x,y)) ys
+  -- xs >>= \x -> fmap (\y -> (x,y)) ys
+  (,) <$> xs <*> ys
 
 dCartesianT, dCartesianTU, dCartesianRaw ::
   (Seq Int, Seq Int) -> (Seq (Int, Int), Interaction (Delta (Seq Int, Seq Int)) (Delta (Seq (Int, Int))))
@@ -110,15 +111,20 @@ forProf =
 
 bfunc :: [BenchType (Seq Int, Seq Int) (Seq (Int, Int))]
 bfunc = [ Scratch "Scratch" cartesianS,
-          Incrementalized "T" dCartesianT,
-          Incrementalized "T-Opt" dCartesianTU,
-          Incrementalized "Raw" dCartesianRaw ]
+--          Incrementalized "T" dCartesianT,
+          -- Scratch "Scratch (from T-Opt)" (fst . dCartesianTU),
+          Incrementalized "Raw" dCartesianRaw,
+          Incrementalized "T-Opt" dCartesianTU
+        ]
 
 main :: IO ()
 -- main = print $! forProf
 main = defaultMain [
-  benchsuit "100-1-0" (mkInitSequences 100) (insOuter 1) bfunc,
-  benchsuit "100-0-1" (mkInitSequences 100) (insInner 1) bfunc,
+  -- benchsuit "100-1-0" (mkInitSequences 100) (insOuter 1) bfunc,
+  -- benchsuit "100-0-1" (mkInitSequences 100) (insInner 1) bfunc,
+  benchsuit "200-0-0" (mkInitSequences 200) [] bfunc,
+  -- benchsuit "400-0-0" (mkInitSequences 400) [] bfunc,
+  -- benchsuit "600-0-0" (mkInitSequences 600) [] bfunc,
   benchsuit "200-1-0" (mkInitSequences 200) (insOuter 1) bfunc,
   benchsuit "200-0-1" (mkInitSequences 200) (insInner 1) bfunc,
   benchsuit "200-10-0" (mkInitSequences 200) (insOuter 10) bfunc,
